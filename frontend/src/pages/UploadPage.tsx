@@ -1,51 +1,178 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useDropzone } from 'react-dropzone'
-import { Upload, CheckCircle, X, Loader2 } from 'lucide-react'
+import { Upload, FileText, X, CheckCircle, Loader2, AlertCircle } from 'lucide-react'
 import { uploadColumns, uploadForeignKeys, uploadERDiagram, parseSchema } from '../api/sessions'
 import { useSessionStore } from '../store/sessionStore'
 
-function DropZone({
-  label, hint, file, onDrop, onRemove
+interface SelectedFiles {
+  columns: File | null
+  fk: File | null
+  er: File | null
+}
+
+function FilePicker({
+  label,
+  hint,
+  file,
+  onSelect,
+  onClear,
+  required,
 }: {
-  label: string; hint: string; file: File | null
-  onDrop: (f: File) => void; onRemove: () => void
+  label: string
+  hint: string
+  file: File | null
+  onSelect: (f: File) => void
+  onClear: () => void
+  required?: boolean
 }) {
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop: (files) => files[0] && onDrop(files[0]),
-    accept: { 'text/csv': ['.csv'], 'application/sql': ['.sql'], 'text/plain': ['.sql', '.csv'] },
-    multiple: false,
-  })
+  const inputRef = useRef<HTMLInputElement>(null)
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="text-sm font-medium mb-1">{label}</div>
-      {file ? (
-        <div className="flex items-center justify-between p-3 rounded-lg" style={{ background: 'var(--color-surface2)', border: '1px solid var(--color-success)' }}>
-          <div className="flex items-center gap-2 text-sm">
-            <CheckCircle size={16} style={{ color: 'var(--color-success)' }} />
-            <span className="mono">{file.name}</span>
-            <span style={{ color: 'var(--color-muted)' }}>({(file.size / 1024).toFixed(1)} KB)</span>
-          </div>
-          <button onClick={onRemove} style={{ color: 'var(--color-muted)' }}>
+    <div className="flex items-center justify-between p-3 rounded-lg" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium flex items-center gap-1">
+          {label}
+          {required && <span style={{ color: 'var(--color-accent)' }}>*</span>}
+        </div>
+        <div className="text-xs mt-0.5" style={{ color: 'var(--color-muted)' }}>
+          {file ? (
+            <span className="flex items-center gap-1" style={{ color: 'var(--color-success)' }}>
+              <CheckCircle size={11} /> {file.name} ({(file.size / 1024).toFixed(1)} KB)
+            </span>
+          ) : hint}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 ml-3 shrink-0">
+        {file && (
+          <button onClick={onClear} style={{ color: 'var(--color-muted)' }}>
             <X size={14} />
           </button>
-        </div>
-      ) : (
-        <div
-          {...getRootProps()}
-          className="rounded-xl p-8 text-center cursor-pointer transition-colors"
-          style={{
-            border: `2px dashed ${isDragActive ? 'var(--color-accent)' : 'var(--color-border)'}`,
-            background: isDragActive ? 'var(--color-accent-dim)' : 'var(--color-surface)',
-          }}
+        )}
+        <button
+          onClick={() => inputRef.current?.click()}
+          className="px-3 py-1.5 rounded text-xs font-medium"
+          style={{ background: 'var(--color-surface2)', color: 'var(--color-text)' }}
         >
-          <input {...getInputProps()} />
-          <Upload size={24} style={{ color: 'var(--color-muted)' }} className="mx-auto mb-2" />
-          <div className="text-sm font-medium">Drag & drop or <span style={{ color: 'var(--color-accent)' }}>browse</span></div>
-          <div className="text-xs mt-1" style={{ color: 'var(--color-muted)' }}>{hint}</div>
+          {file ? 'Change' : 'Select file'}
+        </button>
+      </div>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".csv,.sql,.txt"
+        className="hidden"
+        onChange={(e) => e.target.files?.[0] && onSelect(e.target.files[0])}
+      />
+    </div>
+  )
+}
+
+function UploadModal({
+  onClose,
+  onUpload,
+}: {
+  onClose: () => void
+  onUpload: (files: SelectedFiles) => Promise<void>
+}) {
+  const [files, setFiles] = useState<SelectedFiles>({ columns: null, fk: null, er: null })
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const canUpload = !!files.columns && !!files.fk
+
+  const handleUpload = async () => {
+    if (!canUpload) return
+    setLoading(true)
+    setError(null)
+    try {
+      await onUpload(files)
+    } catch (e: unknown) {
+      setError((e as Error).message)
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.6)' }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        className="w-full max-w-md rounded-2xl overflow-hidden"
+        style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--color-border)' }}>
+          <div>
+            <h2 className="font-semibold">Upload Schema Files</h2>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--color-muted)' }}>
+              Export these from SSMS using the T-SQL extraction scripts
+            </p>
+          </div>
+          <button onClick={onClose} style={{ color: 'var(--color-muted)' }}>
+            <X size={18} />
+          </button>
         </div>
-      )}
+
+        {/* File pickers */}
+        <div className="p-5 space-y-3">
+          <FilePicker
+            label="Column Metadata"
+            hint="Script 1 output — columns.csv"
+            file={files.columns}
+            onSelect={(f) => setFiles((s) => ({ ...s, columns: f }))}
+            onClear={() => setFiles((s) => ({ ...s, columns: null }))}
+            required
+          />
+          <FilePicker
+            label="Foreign Key Relationships"
+            hint="Script 2 output — foreign_keys.csv"
+            file={files.fk}
+            onSelect={(f) => setFiles((s) => ({ ...s, fk: f }))}
+            onClear={() => setFiles((s) => ({ ...s, fk: null }))}
+            required
+          />
+          <FilePicker
+            label="ER Diagram (optional)"
+            hint="PNG or PDF of existing diagram"
+            file={files.er}
+            onSelect={(f) => setFiles((s) => ({ ...s, er: f }))}
+            onClear={() => setFiles((s) => ({ ...s, er: null }))}
+          />
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div className="mx-5 mb-3 flex items-start gap-2 p-3 rounded-lg text-sm" style={{ background: '#450a0a', color: '#fca5a5' }}>
+            <AlertCircle size={14} className="mt-0.5 shrink-0" /> {error}
+          </div>
+        )}
+
+        {/* Footer */}
+        <div className="flex gap-3 px-5 pb-5">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2.5 rounded-lg text-sm"
+            style={{ background: 'var(--color-surface2)', color: 'var(--color-muted)' }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleUpload}
+            disabled={!canUpload || loading}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-black"
+            style={{ background: canUpload && !loading ? 'var(--color-accent)' : 'var(--color-surface2)', color: canUpload && !loading ? '#000' : 'var(--color-muted)' }}
+          >
+            {loading
+              ? <><Loader2 size={14} className="animate-spin" /> Uploading…</>
+              : <><Upload size={14} /> Upload & Continue</>
+            }
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -54,96 +181,66 @@ export default function UploadPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const navigate = useNavigate()
   const { setParsedSchema } = useSessionStore()
+  const [modalOpen, setModalOpen] = useState(false)
 
-  const [columnsFile, setColumnsFile] = useState<File | null>(null)
-  const [fkFile, setFkFile] = useState<File | null>(null)
-  const [erFile, setErFile] = useState<File | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const canProceed = !!columnsFile && !!fkFile
-
-  const handleParse = async () => {
-    if (!sessionId || !canProceed) return
-    setLoading(true)
-    setError(null)
-    try {
-      await uploadColumns(sessionId, columnsFile!)
-      await uploadForeignKeys(sessionId, fkFile!)
-      if (erFile) await uploadERDiagram(sessionId, erFile)
-      const result = await parseSchema(sessionId)
-      setParsedSchema(result)
-      navigate(`/session/${sessionId}/context`)
-    } catch (e: unknown) {
-      setError((e as Error).message)
-    } finally {
-      setLoading(false)
-    }
+  const handleUpload = async (files: SelectedFiles) => {
+    if (!sessionId) return
+    await uploadColumns(sessionId, files.columns!)
+    await uploadForeignKeys(sessionId, files.fk!)
+    if (files.er) await uploadERDiagram(sessionId, files.er)
+    const result = await parseSchema(sessionId)
+    setParsedSchema(result)
+    setModalOpen(false)
+    navigate(`/session/${sessionId}/context`)
   }
 
   return (
-    <div className="max-w-3xl mx-auto py-12 px-6">
-      <div className="text-sm mb-6" style={{ color: 'var(--color-muted)' }}>Step 1 of 5 — Upload your schema files</div>
-      <h1 className="text-2xl font-bold mb-8">Upload SQL Server Schema Files</h1>
+    <>
+      <div className="flex flex-col items-center justify-center h-full px-8 text-center">
+        <div className="max-w-md w-full space-y-6">
 
-      <div className="grid grid-cols-2 gap-6 mb-8">
-        <DropZone
-          label="Table & Column Metadata"
-          hint=".csv or .sql — from Script 1"
-          file={columnsFile}
-          onDrop={setColumnsFile}
-          onRemove={() => setColumnsFile(null)}
-        />
-        <DropZone
-          label="Foreign Key Relationships"
-          hint=".csv or .sql — from Script 2"
-          file={fkFile}
-          onDrop={setFkFile}
-          onRemove={() => setFkFile(null)}
-        />
+          <div className="space-y-3">
+            <div
+              className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto"
+              style={{ background: 'var(--color-surface)' }}
+            >
+              <FileText size={26} style={{ color: 'var(--color-accent)' }} />
+            </div>
+            <h1 className="text-2xl font-bold">Upload your schema files</h1>
+            <p className="text-sm leading-relaxed" style={{ color: 'var(--color-muted)' }}>
+              You'll need two CSV files exported from SQL Server Management Studio —
+              one for column metadata and one for foreign key relationships.
+            </p>
+          </div>
+
+          <button
+            onClick={() => setModalOpen(true)}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-lg font-semibold text-black"
+            style={{ background: 'var(--color-accent)' }}
+          >
+            <Upload size={16} /> Select Files
+          </button>
+
+          <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
+            Don't have the files yet?{' '}
+            <button
+              onClick={() => navigate('/extraction-script')}
+              className="underline"
+              style={{ color: 'var(--color-accent)' }}
+            >
+              Get the extraction scripts
+            </button>
+          </p>
+
+        </div>
       </div>
 
-      {/* Optional ER diagram */}
-      <details className="mb-8">
-        <summary className="text-sm cursor-pointer" style={{ color: 'var(--color-muted)' }}>
-          Upload existing ER diagram (optional — provides AI context)
-        </summary>
-        <div className="mt-4">
-          <DropZone
-            label="ER Diagram (PNG or PDF)"
-            hint="Optional — gives the AI a visual reference"
-            file={erFile}
-            onDrop={setErFile}
-            onRemove={() => setErFile(null)}
-          />
-        </div>
-      </details>
-
-      {/* Extraction script hint */}
-      <details className="mb-8 p-4 rounded-lg" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-        <summary className="text-sm cursor-pointer font-medium">Not sure how to get these files?</summary>
-        <p className="text-sm mt-3" style={{ color: 'var(--color-muted)' }}>
-          Run the provided T-SQL scripts in SSMS against your source database and export the results as CSV.
-          <button onClick={() => navigate('/extraction-script')} className="ml-1" style={{ color: 'var(--color-accent)' }}>
-            Get the scripts →
-          </button>
-        </p>
-      </details>
-
-      {error && (
-        <div className="mb-4 p-3 rounded-lg text-sm" style={{ background: '#7f1d1d', color: '#fca5a5' }}>
-          {error}
-        </div>
+      {modalOpen && (
+        <UploadModal
+          onClose={() => setModalOpen(false)}
+          onUpload={handleUpload}
+        />
       )}
-
-      <button
-        onClick={handleParse}
-        disabled={!canProceed || loading}
-        className="flex items-center gap-2 px-6 py-3 rounded-lg font-semibold text-black disabled:opacity-40"
-        style={{ background: canProceed ? 'var(--color-accent)' : 'var(--color-surface2)' }}
-      >
-        {loading ? <><Loader2 size={16} className="animate-spin" /> Parsing your schema...</> : 'Parse & Continue →'}
-      </button>
-    </div>
+    </>
   )
 }
