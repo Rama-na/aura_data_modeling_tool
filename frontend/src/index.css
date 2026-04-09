@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+:root {
+  --color-bg: #0f1117;
+  --color-surface: #1a1d27;
+  --color-surface2: #252837;
+  --color-border: #2e3245;
+  --color-accent: #f59e0b;
+  --color-accent-dim: #78350f;
+  --color-text: #e2e8f0;
+  --color-muted: #94a3b8;
+  --color-success: #10b981;
+  --color-error: #ef4444;
+  --color-warning: #f59e0b;
+  --color-info: #3b82f6;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  min-height: 100vh;
+}
+
+/* Monospace for code/table names */
+.mono {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.85em;
+}
+
+/* Agent card state borders */
+.card-waiting { border-left: 3px solid var(--color-border); }
+.card-running { border-left: 3px solid var(--color-warning); }
+.card-complete { border-left: 3px solid var(--color-success); }
+.card-error { border-left: 3px solid var(--color-error); }
+
+/* Mermaid container */
+.mermaid-container svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--color-bg); }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
