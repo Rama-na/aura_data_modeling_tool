@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import mermaid from 'mermaid'
 
-mermaid.initialize({
+const MERMAID_CONFIG = {
   startOnLoad: false,
-  theme: 'dark',
+  theme: 'dark' as const,
   themeVariables: {
     background: '#1a1d27',
     primaryColor: '#252837',
@@ -13,7 +13,7 @@ mermaid.initialize({
     secondaryColor: '#252837',
     tertiaryColor: '#1a1d27',
   },
-})
+}
 
 interface Props {
   source: string
@@ -21,6 +21,7 @@ interface Props {
 }
 
 let diagCounter = 0
+let mermaidInitialised = false
 
 export default function MermaidRenderer({ source, loading = false }: Props) {
   const ref = useRef<HTMLDivElement>(null)
@@ -29,6 +30,13 @@ export default function MermaidRenderer({ source, loading = false }: Props) {
   useEffect(() => {
     if (!source || !ref.current) return
     setError(null)
+
+    // Initialise once, lazily, inside the browser context
+    if (!mermaidInitialised) {
+      mermaid.initialize(MERMAID_CONFIG)
+      mermaidInitialised = true
+    }
+
     const id = `mermaid-${++diagCounter}`
     mermaid
       .render(id, source)
@@ -39,6 +47,7 @@ export default function MermaidRenderer({ source, loading = false }: Props) {
         setError('Diagram render error: ' + String(e).slice(0, 120))
       })
   }, [source])
+
 
   return (
     <div className="relative w-full h-full min-h-[400px]">
