@@ -6,8 +6,6 @@ from __future__ import annotations
 
 import logging
 
-import redis.asyncio as aioredis
-
 from app.agents.er_generator import er_generator
 from app.agents.schema_designer import schema_designer
 from app.services import session_state as state
@@ -16,26 +14,25 @@ logger = logging.getLogger(__name__)
 
 
 async def run_iteration(
-    r: aioredis.Redis,
     session_id: str,
     iter_idx: int,
     user_comment: str | None,
 ) -> None:
     """
     Runs Agent 4 (Schema Designer) → Agent 5 (ER Generator) for one iteration.
-    Writes all results to Redis. Sets iteration status to complete or error.
+    Writes all results to in-memory store. Sets iteration status to complete or error.
     """
     try:
-        # --- Load context from Redis ---
-        parsed_schema = await state.get_json(r, session_id, "parsed_schema")
-        classifications = await state.get_json(r, session_id, "approved_classifications")
-        relationships = await state.get_json(r, session_id, "relationship_graph")
-        pre_run_context = (await state.get_json(r, session_id, "pre_run_context")) or ""
+        # --- Load context ---
+        parsed_schema = state.get_json(session_id, "parsed_schema")
+        classifications = state.get_json(session_id, "approved_classifications")
+        relationships = state.get_json(session_id, "relationship_graph")
+        pre_run_context = state.get_json(session_id, "pre_run_context") or ""
 
         # Prior plan: previous iteration's Agent 4 output (or None for iter 0)
         prior_plan = None
         if iter_idx > 0:
-            prev_detail = await state.get_iteration_detail(r, session_id, iter_idx - 1)
+            prev_detail = state.get_iteration_detail(session_id, iter_idx - 1)
             if prev_detail:
                 prior_plan = prev_detail["agent4"]["output"]
 
@@ -61,13 +58,12 @@ async def run_iteration(
         schema_plan = a4["result"]
         a4_resp = a4["llm_response"]
 
-        await state.write_agent4_result(
-            r=r,
+        state.write_agent4_result(
             session_id=session_id,
             iter_idx=iter_idx,
             input_snapshot=agent4_input,
             output=schema_plan,
-            reasoning="",  # schema_designer doesn't expose separate reasoning
+            reasoning="",
             duration_ms=a4_resp.duration_ms,
             token_usage={
                 "prompt_tokens": a4_resp.prompt_tokens,
@@ -84,8 +80,7 @@ async def run_iteration(
         a5 = er_generator.run(schema_plan=schema_plan)
         a5_resp = a5["llm_response"]
 
-        await state.write_agent5_result(
-            r=r,
+        state.write_agent5_result(
             session_id=session_id,
             iter_idx=iter_idx,
             input_snapshot=agent5_input,
@@ -101,10 +96,10 @@ async def run_iteration(
             required_retry=a5["required_retry"],
         )
 
-        await state.mark_iteration_complete(r, session_id, iter_idx)
+        state.mark_iteration_complete(session_id, iter_idx)
         logger.info(f"[{session_id}] iter {iter_idx}: complete")
 
     except Exception as exc:
         logger.exception(f"[{session_id}] iter {iter_idx}: error — {exc}")
-        await state.mark_iteration_error(r, session_id, iter_idx, str(exc)[:500])
+        state.mark_iteration_error(session_id, iter_idx, str(exc)[:500])
         raise

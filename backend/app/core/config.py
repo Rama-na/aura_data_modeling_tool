@@ -9,15 +9,12 @@ class Settings:
     AZURE_OPENAI_KEY: str = os.getenv("AZURE_OPENAI_KEY", "")
     AZURE_OPENAI_DEPLOYMENT: str = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
 
-    REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379")
     SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-key")
     CORS_ORIGINS: list[str] = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
     DEBUG_MODE: bool = os.getenv("DEBUG_MODE", "false").lower() == "true"
 
     UPLOADS_DIR: Path = BASE_DIR / "uploads"
     OUTPUTS_DIR: Path = BASE_DIR / "outputs"
-
-    SESSION_TTL_SECONDS: int = 86400  # 24h
 
     # Max tables per notebook chunk
     MAX_TABLES_PER_NOTEBOOK: int = 8

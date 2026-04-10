@@ -34,6 +34,10 @@ def get_upload_path(session_id: str, filename: str) -> Path:
     return uploads_dir(session_id) / filename
 
 
+def get_upload_dir(session_id: str) -> Path:
+    return uploads_dir(session_id)
+
+
 def save_notebook(session_id: str, filename: str, notebook_json: dict) -> Path:
     path = notebooks_dir(session_id) / filename
     path.write_text(json.dumps(notebook_json, indent=2), encoding="utf-8")

@@ -27,8 +27,7 @@ class SessionMeta(BaseModel):
     updated_at: datetime
     last_iter_idx: int = -1
     error_msg: Optional[str] = None
-    source_columns_file: Optional[str] = None
-    source_fk_file: Optional[str] = None
+    source_sql_files: list[str] = []
 
 
 class SessionSummary(BaseModel):

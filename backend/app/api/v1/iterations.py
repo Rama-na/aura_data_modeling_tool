@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from app.core.redis_client import get_redis
 from app.services import session_state as state
 from app.workers.refinement_worker import run_refinement_iteration
 
@@ -29,13 +29,13 @@ class SubmitCommentRequest(BaseModel):
 
 
 @router.get("")
-async def list_iterations(session_id: str, r=Depends(get_redis)):
-    meta = await state.get_session(r, session_id)
+async def list_iterations(session_id: str):
+    meta = state.get_session(session_id)
     if not meta:
         raise HTTPException(404, "Session not found")
 
-    summaries = await state.list_iteration_summaries(r, session_id)
-    latest_idx = await state.get_current_iter_idx(r, session_id)
+    summaries = state.list_iteration_summaries(session_id)
+    latest_idx = state.get_current_iter_idx(session_id)
 
     return ok({
         "session_id": session_id,
@@ -46,12 +46,12 @@ async def list_iterations(session_id: str, r=Depends(get_redis)):
 
 
 @router.get("/{iter_idx}")
-async def get_iteration(session_id: str, iter_idx: int, r=Depends(get_redis)):
-    meta = await state.get_session(r, session_id)
+async def get_iteration(session_id: str, iter_idx: int):
+    meta = state.get_session(session_id)
     if not meta:
         raise HTTPException(404, "Session not found")
 
-    detail = await state.get_iteration_detail(r, session_id, iter_idx)
+    detail = state.get_iteration_detail(session_id, iter_idx)
     if not detail:
         raise HTTPException(404, f"Iteration {iter_idx} not found")
 
@@ -63,7 +63,6 @@ async def submit_comment(
     session_id: str,
     body: SubmitCommentRequest,
     background_tasks: BackgroundTasks,
-    r=Depends(get_redis),
 ):
     """
     Submit a refinement comment. Creates a new iteration and runs Agent 4 + 5.
@@ -73,20 +72,20 @@ async def submit_comment(
     if not body.user_comment or not body.user_comment.strip():
         raise HTTPException(400, "user_comment must not be empty")
 
-    meta = await state.get_session(r, session_id)
+    meta = state.get_session(session_id)
     if not meta:
         raise HTTPException(404, "Session not found")
 
     # Guard against double-submit
-    running = await state.get_running_iteration_idx(r, session_id)
+    running = state.get_running_iteration_idx(session_id)
     if running is not None:
         raise HTTPException(409, detail={
             "error": "iteration_already_running",
             "running_iter_idx": running,
         })
 
-    iter_idx = await state.create_iteration(
-        r, session_id, trigger="user_comment", user_comment=body.user_comment.strip()
+    iter_idx = state.create_iteration(
+        session_id, trigger="user_comment", user_comment=body.user_comment.strip()
     )
 
     background_tasks.add_task(
@@ -96,7 +95,6 @@ async def submit_comment(
         user_comment=body.user_comment.strip(),
     )
 
-    from fastapi.responses import JSONResponse
     return JSONResponse(
         status_code=202,
         content={

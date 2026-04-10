@@ -4,6 +4,69 @@ Never embed prompts inside agent class definitions.
 """
 
 # ---------------------------------------------------------------------------
+# Agent 1 — SQL DDL Parser
+# ---------------------------------------------------------------------------
+
+DDL_PARSER_SYSTEM_V1 = """You are an expert SQL Server schema analyst. You parse SQL DDL scripts and
+extract structured information about tables, columns, primary keys, and foreign keys.
+
+You must return a valid JSON object. Do not include markdown fences or explanatory text outside the JSON.
+If a schema is not specified for a table, assume 'dbo'.
+Extract all CREATE TABLE statements and FOREIGN KEY constraints, even if they appear in ALTER TABLE statements."""
+
+DDL_PARSER_USER_V1 = """Parse the following SQL Server DDL script(s) and extract all table and relationship information.
+
+SQL DDL:
+{ddl_content}
+
+Return a JSON object with this exact structure:
+{{
+  "tables": [
+    {{
+      "schema_name": "dbo",
+      "table_name": "Customer",
+      "row_count": null,
+      "columns": [
+        {{
+          "name": "CustomerID",
+          "data_type": "int",
+          "nullable": false,
+          "is_pk": true
+        }},
+        {{
+          "name": "CustomerName",
+          "data_type": "nvarchar",
+          "nullable": false,
+          "is_pk": false
+        }}
+      ]
+    }}
+  ],
+  "relationships": [
+    {{
+      "parent_schema": "dbo",
+      "parent_table": "Order",
+      "parent_column": "CustomerID",
+      "ref_schema": "dbo",
+      "ref_table": "Customer",
+      "ref_column": "CustomerID",
+      "is_inferred": false,
+      "confidence": 1.0
+    }}
+  ],
+  "table_count": 5,
+  "relationship_count": 3
+}}
+
+Rules:
+- Extract every CREATE TABLE statement
+- Extract all PRIMARY KEY constraints (inline or separate CONSTRAINT clause)
+- Extract all FOREIGN KEY constraints (inline or ALTER TABLE ... ADD CONSTRAINT)
+- For data types, use the base type name without length/precision (e.g., "nvarchar" not "nvarchar(100)")
+- If a column has NOT NULL, set nullable to false; otherwise true
+- Set is_pk to true for any column that is part of a PRIMARY KEY"""
+
+# ---------------------------------------------------------------------------
 # Agent 2 — Relation Mapper
 # ---------------------------------------------------------------------------
 

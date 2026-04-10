@@ -8,8 +8,7 @@ export interface SessionMeta {
   updated_at: string
   last_iter_idx: number
   table_count?: number
-  source_columns_file?: string
-  source_fk_file?: string
+  source_sql_files?: string[]
 }
 
 interface SessionStore {

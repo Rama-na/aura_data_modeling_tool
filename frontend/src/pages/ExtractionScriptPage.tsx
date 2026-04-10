@@ -2,51 +2,68 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Copy, Check } from 'lucide-react'
 
-const SCRIPT_1 = `-- Script 1: Table & Column Metadata
--- Run in SSMS against your source database, then export results as CSV
-SELECT
-    t.TABLE_SCHEMA,
-    t.TABLE_NAME,
-    c.COLUMN_NAME,
-    c.DATA_TYPE,
-    c.IS_NULLABLE,
-    CASE WHEN kcu.COLUMN_NAME IS NOT NULL THEN 1 ELSE 0 END AS IS_PK,
-    p.rows AS ROW_COUNT
-FROM INFORMATION_SCHEMA.TABLES t
-JOIN INFORMATION_SCHEMA.COLUMNS c
-    ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME
-LEFT JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
-    ON tc.TABLE_SCHEMA = t.TABLE_SCHEMA AND tc.TABLE_NAME = t.TABLE_NAME
-    AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
-LEFT JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
-    ON kcu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
-    AND kcu.COLUMN_NAME = c.COLUMN_NAME
-LEFT JOIN sys.partitions p
-    ON p.object_id = OBJECT_ID(t.TABLE_SCHEMA + '.' + t.TABLE_NAME)
-    AND p.index_id IN (0, 1)
-WHERE t.TABLE_TYPE = 'BASE TABLE'
-ORDER BY t.TABLE_SCHEMA, t.TABLE_NAME, c.ORDINAL_POSITION;`
+const DDL_SCRIPT = `-- DDL Extraction Script
+-- Run in SSMS against your source database.
+-- It generates CREATE TABLE statements with PRIMARY KEY and FOREIGN KEY constraints.
+-- Save the output as a .sql file and upload it to Aura Data Modeler.
 
-const SCRIPT_2 = `-- Script 2: Foreign Key Relationships
--- Run in SSMS against your source database, then export results as CSV
-SELECT
-    tp.TABLE_SCHEMA  AS PARENT_SCHEMA,
-    tp.TABLE_NAME    AS PARENT_TABLE,
-    kcu.COLUMN_NAME  AS PARENT_COLUMN,
-    tr.TABLE_SCHEMA  AS REF_SCHEMA,
-    tr.TABLE_NAME    AS REF_TABLE,
-    kcu2.COLUMN_NAME AS REF_COLUMN
-FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc
-JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS tp
-    ON tp.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
-JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS tr
-    ON tr.CONSTRAINT_NAME = rc.UNIQUE_CONSTRAINT_NAME
+DECLARE @sql NVARCHAR(MAX) = '';
+
+-- Generate CREATE TABLE statements
+SELECT @sql += 'CREATE TABLE [' + t.TABLE_SCHEMA + '].[' + t.TABLE_NAME + '] (' + CHAR(13) +
+    STUFF((
+        SELECT ', ' + CHAR(13) + '    [' + c.COLUMN_NAME + '] ' +
+               c.DATA_TYPE +
+               CASE
+                 WHEN c.DATA_TYPE IN ('nvarchar','nchar','varchar','char') AND c.CHARACTER_MAXIMUM_LENGTH IS NOT NULL
+                   THEN '(' + CASE WHEN c.CHARACTER_MAXIMUM_LENGTH = -1 THEN 'MAX' ELSE CAST(c.CHARACTER_MAXIMUM_LENGTH AS VARCHAR) END + ')'
+                 WHEN c.DATA_TYPE IN ('decimal','numeric') AND c.NUMERIC_PRECISION IS NOT NULL
+                   THEN '(' + CAST(c.NUMERIC_PRECISION AS VARCHAR) + ',' + CAST(ISNULL(c.NUMERIC_SCALE,0) AS VARCHAR) + ')'
+                 ELSE ''
+               END +
+               CASE WHEN c.IS_NULLABLE = 'NO' THEN ' NOT NULL' ELSE ' NULL' END +
+               CASE WHEN c.COLUMN_DEFAULT IS NOT NULL THEN ' DEFAULT ' + c.COLUMN_DEFAULT ELSE '' END
+        FROM INFORMATION_SCHEMA.COLUMNS c
+        WHERE c.TABLE_SCHEMA = t.TABLE_SCHEMA AND c.TABLE_NAME = t.TABLE_NAME
+        ORDER BY c.ORDINAL_POSITION
+        FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '    ') +
+    CHAR(13) + ');' + CHAR(13) + CHAR(13)
+FROM INFORMATION_SCHEMA.TABLES t
+WHERE t.TABLE_TYPE = 'BASE TABLE'
+ORDER BY t.TABLE_SCHEMA, t.TABLE_NAME;
+
+-- Add PRIMARY KEY constraints
+SELECT @sql += 'ALTER TABLE [' + kcu.TABLE_SCHEMA + '].[' + kcu.TABLE_NAME + ']' + CHAR(13) +
+    '    ADD CONSTRAINT [' + tc.CONSTRAINT_NAME + '] PRIMARY KEY (' +
+    STUFF((
+        SELECT ', [' + k2.COLUMN_NAME + ']'
+        FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE k2
+        WHERE k2.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+          AND k2.TABLE_SCHEMA = tc.TABLE_SCHEMA
+        ORDER BY k2.ORDINAL_POSITION
+        FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '') +
+    ');' + CHAR(13) + CHAR(13)
+FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
 JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
-    ON kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
+    ON kcu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+    AND kcu.TABLE_SCHEMA = tc.TABLE_SCHEMA
+WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+  AND kcu.ORDINAL_POSITION = 1;
+
+-- Add FOREIGN KEY constraints
+SELECT @sql += 'ALTER TABLE [' + tp.TABLE_SCHEMA + '].[' + tp.TABLE_NAME + ']' + CHAR(13) +
+    '    ADD CONSTRAINT [' + rc.CONSTRAINT_NAME + '] FOREIGN KEY ([' + kcu.COLUMN_NAME + '])' + CHAR(13) +
+    '    REFERENCES [' + tr.TABLE_SCHEMA + '].[' + tr.TABLE_NAME + '] ([' + kcu2.COLUMN_NAME + ']);' + CHAR(13) + CHAR(13)
+FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc
+JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS tp ON tp.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
+JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS tr ON tr.CONSTRAINT_NAME = rc.UNIQUE_CONSTRAINT_NAME
+JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu ON kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
 JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu2
     ON kcu2.CONSTRAINT_NAME = rc.UNIQUE_CONSTRAINT_NAME
-    AND kcu2.ORDINAL_POSITION = kcu.ORDINAL_POSITION
-ORDER BY tp.TABLE_SCHEMA, tp.TABLE_NAME, kcu.ORDINAL_POSITION;`
+    AND kcu2.ORDINAL_POSITION = kcu.ORDINAL_POSITION;
+
+-- Print the result (copy from Messages tab)
+PRINT @sql;`
 
 function CodeBlock({ code, label }: { code: string; label: string }) {
   const [copied, setCopied] = useState(false)
@@ -67,7 +84,7 @@ function CodeBlock({ code, label }: { code: string; label: string }) {
           {copied ? <><Check size={12} /> Copied!</> : <><Copy size={12} /> Copy</>}
         </button>
       </div>
-      <pre className="p-4 overflow-x-auto text-xs mono" style={{ background: 'var(--color-bg)', color: 'var(--color-text)' }}>
+      <pre className="p-4 overflow-x-auto text-xs" style={{ background: 'var(--color-bg)', color: 'var(--color-text)', fontFamily: 'monospace' }}>
         {code}
       </pre>
     </div>
@@ -79,18 +96,20 @@ export default function ExtractionScriptPage() {
 
   return (
     <div className="max-w-3xl mx-auto py-10 px-6">
-      <h1 className="text-2xl font-bold mb-2">Get your schema files from SQL Server</h1>
+      <h1 className="text-2xl font-bold mb-2">Extract your SQL Server schema</h1>
       <p className="text-sm mb-8" style={{ color: 'var(--color-muted)' }}>
-        Run these T-SQL scripts in SSMS against your source database and export the results as CSV files.
+        Run this T-SQL script in SSMS to generate a DDL file that Aura can parse automatically.
+        The script outputs CREATE TABLE statements with all primary and foreign key constraints.
       </p>
 
-      <ol className="space-y-6 mb-10">
+      <ol className="space-y-4 mb-10">
         {[
-          'Connect to your SQL Server database in SSMS.',
-          'Open a new Query window (Ctrl+N).',
-          'Paste and run Script 1 below. When complete, right-click the results grid → Save Results As → choose CSV. Name it columns.csv.',
-          'Paste and run Script 2 below. Save results as foreign_keys.csv.',
-          'Go back to the upload page and drop both files.',
+          'Open SQL Server Management Studio and connect to your database.',
+          'Open a new Query window (Ctrl+N) and select your source database from the dropdown.',
+          'Paste and run the script below.',
+          'In the Messages tab (not Results), you will see the generated DDL. Select all, copy it.',
+          'Paste into a new file and save it with a .sql extension (e.g. schema.sql).',
+          'Upload the .sql file on the Upload page.',
         ].map((step, i) => (
           <li key={i} className="flex gap-3">
             <span
@@ -105,14 +124,13 @@ export default function ExtractionScriptPage() {
       </ol>
 
       <div className="space-y-6 mb-8">
-        <CodeBlock code={SCRIPT_1} label="Script 1 — Table & Column Metadata" />
-        <CodeBlock code={SCRIPT_2} label="Script 2 — Foreign Key Relationships" />
+        <CodeBlock code={DDL_SCRIPT} label="DDL Extraction Script" />
       </div>
 
       <div className="p-4 rounded-lg text-sm mb-8" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-muted)' }}>
-        <strong style={{ color: 'var(--color-text)' }}>How to export as CSV in SSMS:</strong> After running a query,
-        right-click anywhere in the results grid → Save Results As → Files of type: CSV. Ensure column headers are included
-        (default SSMS setting).
+        <strong style={{ color: 'var(--color-text)' }}>Tip:</strong> You can also upload any existing DDL scripts
+        you already have — migration files, table creation scripts, etc. Aura accepts any .sql file with
+        CREATE TABLE statements. You can upload multiple files at once.
       </div>
 
       <button

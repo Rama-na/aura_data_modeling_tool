@@ -5,7 +5,7 @@ import { listSessions } from '../../api/sessions'
 import { useSessionStore } from '../../store/sessionStore'
 
 const STEPS = [
-  { key: 'home',     label: 'Home',           icon: Home,          path: (id: string) => '/' },
+  { key: 'home',     label: 'Home',           icon: Home,          path: (_id: string) => '/' },
   { key: 'upload',   label: 'Upload Files',   icon: Upload,        path: (id: string) => `/session/${id}/upload` },
   { key: 'context',  label: 'Review Schema',  icon: Table2,        path: (id: string) => `/session/${id}/context` },
   { key: 'pipeline', label: 'AI Analysis',    icon: BrainCircuit,  path: (id: string) => `/session/${id}/pipeline` },
@@ -43,7 +43,11 @@ export default function AppSidebar() {
   }, [location.pathname])
 
   const handleStepClick = (step: typeof STEPS[0]) => {
-    if (!activeSessionId && step.key !== 'home') return
+    if (step.key === 'home') {
+      navigate('/')
+      return
+    }
+    if (!activeSessionId) return
     navigate(step.path(activeSessionId))
   }
 

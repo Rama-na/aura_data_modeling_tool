@@ -18,18 +18,12 @@ export const deleteSession = (id: string) =>
 export const resetSession = (id: string) =>
   api.post(`/sessions/${id}/reset`).then((r) => r.data)
 
-export const uploadColumns = (id: string, file: File) => {
+export const uploadSqlFiles = (id: string, files: File[]) => {
   const form = new FormData()
-  form.append('file', file)
-  return api.post(`/sessions/${id}/uploads/columns`, form, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  }).then((r) => r.data)
-}
-
-export const uploadForeignKeys = (id: string, file: File) => {
-  const form = new FormData()
-  form.append('file', file)
-  return api.post(`/sessions/${id}/uploads/foreignkeys`, form, {
+  for (const file of files) {
+    form.append('files', file)
+  }
+  return api.post(`/sessions/${id}/uploads/sql`, form, {
     headers: { 'Content-Type': 'multipart/form-data' },
   }).then((r) => r.data)
 }
