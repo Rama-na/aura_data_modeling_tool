@@ -17,14 +17,12 @@ interface SessionStore {
   parsedSchema: unknown | null
   classificationResult: unknown | null
   approvedClassifications: unknown[] | null
-  sidebarOpen: boolean
 
   setCurrentSession: (s: SessionMeta | null) => void
   setSessions: (sessions: SessionMeta[]) => void
   setParsedSchema: (s: unknown) => void
   setClassificationResult: (r: unknown) => void
   setApprovedClassifications: (c: unknown[]) => void
-  toggleSidebar: () => void
 }
 
 export const useSessionStore = create<SessionStore>((set) => ({
@@ -33,12 +31,10 @@ export const useSessionStore = create<SessionStore>((set) => ({
   parsedSchema: null,
   classificationResult: null,
   approvedClassifications: null,
-  sidebarOpen: false,
 
   setCurrentSession: (s) => set({ currentSession: s }),
   setSessions: (sessions) => set({ sessions }),
   setParsedSchema: (s) => set({ parsedSchema: s }),
   setClassificationResult: (r) => set({ classificationResult: r }),
   setApprovedClassifications: (c) => set({ approvedClassifications: c }),
-  toggleSidebar: () => set((st) => ({ sidebarOpen: !st.sidebarOpen })),
 }))
