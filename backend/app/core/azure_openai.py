@@ -1,6 +1,11 @@
 """
 Base LLM client abstracted behind a single class.
 All agents import from here — never instantiate the Azure client inline.
+
+Compatibility notes for gpt-5.3-chat (o-series reasoning model):
+  - 'temperature' is not supported; omitted from all requests.
+  - 'system' role is replaced by 'developer' role.
+  - 'max_tokens' replaced by 'max_completion_tokens'.
 """
 from __future__ import annotations
 
@@ -48,19 +53,20 @@ class AzureLLMClient:
         self,
         system_prompt: str,
         user_prompt: str,
-        temperature: float = 0.2,
+        temperature: float = 1.0,   # kept in signature for call-site compatibility; not sent to API
         max_tokens: int = 4096,
         response_format: dict | None = None,
     ) -> LLMResponse:
         client = self._get_client()
         start = time.monotonic()
+        # gpt-5.3-chat (o-series): uses 'developer' role (not 'system'),
+        # does not accept 'temperature', uses 'max_completion_tokens'.
         kwargs: dict = {
             "model": self._deployment,
             "messages": [
-                {"role": "system", "content": system_prompt},
+                {"role": "developer", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "temperature": temperature,
             "max_completion_tokens": max_tokens,
         }
         if response_format:
