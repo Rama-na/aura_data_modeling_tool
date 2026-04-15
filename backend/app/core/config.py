@@ -1,13 +1,19 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parents[3]  # project root
+BACKEND_DIR = Path(__file__).resolve().parents[2]  # backend/
+
+# Load .env from the backend directory
+load_dotenv(BACKEND_DIR / ".env")
 
 
 class Settings:
     AZURE_OPENAI_ENDPOINT: str = os.getenv("AZURE_OPENAI_ENDPOINT", "")
     AZURE_OPENAI_KEY: str = os.getenv("AZURE_OPENAI_KEY", "")
-    AZURE_OPENAI_DEPLOYMENT: str = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
+    AZURE_OPENAI_DEPLOYMENT: str = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-5.3-chat")
+    AZURE_OPENAI_API_VERSION: str = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01")
 
     SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-key")
     CORS_ORIGINS: list[str] = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")

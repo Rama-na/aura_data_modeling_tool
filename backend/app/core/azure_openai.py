@@ -27,7 +27,7 @@ class AzureLLMClient:
         self._client = AzureOpenAI(
             azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
             api_key=settings.AZURE_OPENAI_KEY,
-            api_version="2024-08-01-preview",
+            api_version=settings.AZURE_OPENAI_API_VERSION,
         )
         self._deployment = settings.AZURE_OPENAI_DEPLOYMENT
 
