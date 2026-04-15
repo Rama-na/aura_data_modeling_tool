@@ -24,12 +24,25 @@ class AzureLLMClient:
     """Thin wrapper around AzureOpenAI for consistent usage across agents."""
 
     def __init__(self) -> None:
-        self._client = AzureOpenAI(
-            azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
-            api_key=settings.AZURE_OPENAI_KEY,
-            api_version=settings.AZURE_OPENAI_API_VERSION,
-        )
-        self._deployment = settings.AZURE_OPENAI_DEPLOYMENT
+        self._client: AzureOpenAI | None = None
+        self._deployment: str = ""
+
+    def _get_client(self) -> AzureOpenAI:
+        if self._client is None:
+            endpoint = settings.AZURE_OPENAI_ENDPOINT
+            if not endpoint or not endpoint.startswith("http"):
+                raise RuntimeError(
+                    "AZURE_OPENAI_ENDPOINT is not set. "
+                    "Create backend/.env with your Azure OpenAI credentials "
+                    "(see .env.example) and restart the server."
+                )
+            self._client = AzureOpenAI(
+                azure_endpoint=endpoint,
+                api_key=settings.AZURE_OPENAI_KEY,
+                api_version=settings.AZURE_OPENAI_API_VERSION,
+            )
+            self._deployment = settings.AZURE_OPENAI_DEPLOYMENT
+        return self._client
 
     def complete(
         self,
@@ -39,6 +52,7 @@ class AzureLLMClient:
         max_tokens: int = 4096,
         response_format: dict | None = None,
     ) -> LLMResponse:
+        client = self._get_client()
         start = time.monotonic()
         kwargs: dict = {
             "model": self._deployment,
@@ -52,7 +66,7 @@ class AzureLLMClient:
         if response_format:
             kwargs["response_format"] = response_format
 
-        response = self._client.chat.completions.create(**kwargs)
+        response = client.chat.completions.create(**kwargs)
         duration_ms = int((time.monotonic() - start) * 1000)
 
         usage = response.usage
