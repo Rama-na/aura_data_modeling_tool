@@ -61,7 +61,7 @@ class AzureLLMClient:
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": temperature,
-            "max_tokens": max_tokens,
+            "max_completion_tokens": max_tokens,
         }
         if response_format:
             kwargs["response_format"] = response_format
