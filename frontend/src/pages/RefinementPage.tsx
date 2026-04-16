@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Copy, ChevronDown, ChevronRight, AlertCircle, Loader2, FileText, CheckCircle2 } from 'lucide-react'
-import { useRefinementStore, IterationDetail, IterationStage } from '../store/refinementStore'
+import { useRefinementStore, type IterationDetail, type IterationStage } from '../store/refinementStore'
 import MermaidRenderer from '../components/ERDiagramPanel/MermaidRenderer'
 import VersionSwitcher from '../components/ERDiagramPanel/VersionSwitcher'
 import DataDictionary from '../components/RefinementPanel/DataDictionary'

@@ -1,4 +1,4 @@
-import { IterationSummary } from '../../store/refinementStore'
+import type { IterationSummary } from '../../store/refinementStore'
 
 interface Props {
   iterations: IterationSummary[]

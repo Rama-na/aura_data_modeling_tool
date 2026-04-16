@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import { IterationDetail } from '../../store/refinementStore'
+import type { IterationDetail } from '../../store/refinementStore'
 
 interface Props {
   iterations: IterationDetail[]
