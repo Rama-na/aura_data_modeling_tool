@@ -253,7 +253,7 @@ export default function UploadPage() {
     await uploadSqlFiles(sessionId, sqlFiles)
     if (erFile) await uploadERDiagram(sessionId, erFile)
     const result = await parseSchema(sessionId)
-    setParsedSchema(result)
+    setParsedSchema(result.parsed_schema)
     setModalOpen(false)
     navigate(`/session/${sessionId}/context`)
   }

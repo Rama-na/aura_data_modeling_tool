@@ -15,6 +15,19 @@ interface ClassificationRow {
   user_override?: boolean
 }
 
+interface ColumnInfo {
+  name: string
+  data_type: string
+  nullable: boolean
+  is_pk: boolean
+}
+
+interface TableInfo {
+  schema_name: string
+  table_name: string
+  columns: ColumnInfo[]
+}
+
 function ClassificationBadge({ cls }: { cls: Classification }) {
   const colors: Record<Classification, { bg: string; text: string }> = {
     fact: { bg: '#064e3b', text: '#6ee7b7' },
@@ -32,7 +45,7 @@ function ClassificationBadge({ cls }: { cls: Classification }) {
 export default function PipelinePage() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const navigate = useNavigate()
-  const { classificationResult, setApprovedClassifications } = useSessionStore()
+  const { classificationResult, setApprovedClassifications, parsedSchema } = useSessionStore()
 
   const raw = classificationResult as {
     classifications: ClassificationRow[]
@@ -42,8 +55,11 @@ export default function PipelinePage() {
     summary?: string
   } | null
 
+  const schemaTables = ((parsedSchema as { tables?: TableInfo[] } | null)?.tables || [])
+
   const [rows, setRows] = useState<ClassificationRow[]>(raw?.classifications || [])
   const [comment, setComment] = useState('')
+  const [expandedTable, setExpandedTable] = useState<string | null>(null)
   const [expandedReasoning, setExpandedReasoning] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -56,6 +72,13 @@ export default function PipelinePage() {
     setRows((prev) => prev.map((r, i) => i === idx ? { ...r, classification: cls, user_override: true } : r))
   }
 
+  const getColumns = (schema_name: string, table_name: string): ColumnInfo[] => {
+    const t = schemaTables.find(
+      (t) => t.schema_name === schema_name && t.table_name === table_name
+    )
+    return t?.columns || []
+  }
+
   const handleApprove = async () => {
     if (!sessionId) return
     setLoading(true)
@@ -63,8 +86,7 @@ export default function PipelinePage() {
     try {
       await approveCheckpoint1(sessionId, rows)
       setApprovedClassifications(rows)
-      const result = await approveCheckpoint2(sessionId, comment)
-      // Trigger iter 0 via refinement store
+      await approveCheckpoint2(sessionId, comment)
       useRefinementStore.getState().sessionId === null &&
         (useRefinementStore.setState({ sessionId }))
       navigate(`/session/${sessionId}/refine`)
@@ -81,6 +103,7 @@ export default function PipelinePage() {
       <h1 className="text-2xl font-bold mb-2">Domain Classification</h1>
       <p className="text-sm mb-6" style={{ color: 'var(--color-muted)' }}>
         The AI has classified each table. Override any that are incorrect before proceeding.
+        Click a table name to see its columns.
       </p>
 
       {/* Summary badges */}
@@ -110,38 +133,89 @@ export default function PipelinePage() {
             {rows.map((row, i) => {
               const key = `${row.schema_name}.${row.table_name}`
               const dimmed = row.classification === 'ignore'
+              const colsExpanded = expandedTable === key
+              const cols = getColumns(row.schema_name, row.table_name)
               return (
-                <tr
-                  key={key}
-                  style={{
-                    background: i % 2 === 0 ? 'var(--color-surface)' : 'var(--color-bg)',
-                    opacity: dimmed ? 0.5 : 1,
-                  }}
-                >
-                  <td className="px-4 py-2.5 mono">{key}</td>
-                  <td className="px-4 py-2.5">
-                    <select
-                      value={row.classification}
-                      onChange={(e) => handleOverride(i, e.target.value as Classification)}
-                      className="rounded px-2 py-1 text-xs outline-none"
-                      style={{ background: 'var(--color-surface2)', color: 'var(--color-text)', border: row.user_override ? '1px solid var(--color-accent)' : 'none' }}
+                <>
+                  <tr
+                    key={key}
+                    style={{
+                      background: i % 2 === 0 ? 'var(--color-surface)' : 'var(--color-bg)',
+                      opacity: dimmed ? 0.5 : 1,
+                    }}
+                  >
+                    <td className="px-4 py-2.5">
+                      <button
+                        className="flex items-center gap-1.5 mono font-medium text-left hover:opacity-80"
+                        onClick={() => setExpandedTable(colsExpanded ? null : key)}
+                        title={cols.length > 0 ? `${cols.length} columns` : 'No column data'}
+                      >
+                        {colsExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                        {key}
+                        {cols.length > 0 && (
+                          <span className="text-xs px-1.5 py-0.5 rounded ml-1" style={{ background: 'var(--color-surface2)', color: 'var(--color-muted)' }}>
+                            {cols.length}
+                          </span>
+                        )}
+                      </button>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <select
+                        value={row.classification}
+                        onChange={(e) => handleOverride(i, e.target.value as Classification)}
+                        className="rounded px-2 py-1 text-xs outline-none"
+                        style={{ background: 'var(--color-surface2)', color: 'var(--color-text)', border: row.user_override ? '1px solid var(--color-accent)' : 'none' }}
+                      >
+                        <option value="fact">fact</option>
+                        <option value="dimension">dimension</option>
+                        <option value="ignore">ignore</option>
+                      </select>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <button
+                        onClick={() => setExpandedReasoning(expandedReasoning === key ? null : key)}
+                        className="flex items-center gap-1 text-xs"
+                        style={{ color: 'var(--color-muted)' }}
+                      >
+                        {expandedReasoning === key ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                        {expandedReasoning === key ? row.reasoning : row.reasoning.slice(0, 60) + '…'}
+                      </button>
+                    </td>
+                  </tr>
+                  {colsExpanded && cols.length > 0 && (
+                    <tr
+                      key={`${key}-cols`}
+                      style={{ background: i % 2 === 0 ? 'var(--color-surface)' : 'var(--color-bg)' }}
                     >
-                      <option value="fact">fact</option>
-                      <option value="dimension">dimension</option>
-                      <option value="ignore">ignore</option>
-                    </select>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <button
-                      onClick={() => setExpandedReasoning(expandedReasoning === key ? null : key)}
-                      className="flex items-center gap-1 text-xs"
-                      style={{ color: 'var(--color-muted)' }}
-                    >
-                      {expandedReasoning === key ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                      {expandedReasoning === key ? row.reasoning : row.reasoning.slice(0, 60) + '…'}
-                    </button>
-                  </td>
-                </tr>
+                      <td colSpan={3} className="px-8 pb-3 pt-0">
+                        <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr style={{ background: 'var(--color-surface2)', color: 'var(--color-muted)' }}>
+                                <th className="text-left px-3 py-1.5 font-medium">Column</th>
+                                <th className="text-left px-3 py-1.5 font-medium">Type</th>
+                                <th className="text-left px-3 py-1.5 font-medium">Nullable</th>
+                                <th className="text-left px-3 py-1.5 font-medium">PK</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {cols.map((col) => (
+                                <tr key={col.name} style={{ borderTop: '1px solid var(--color-border)' }}>
+                                  <td className="px-3 py-1.5 mono">{col.name}</td>
+                                  <td className="px-3 py-1.5" style={{ color: 'var(--color-muted)' }}>{col.data_type}</td>
+                                  <td className="px-3 py-1.5" style={{ color: 'var(--color-muted)' }}>{col.nullable ? 'YES' : 'NO'}</td>
+                                  <td className="px-3 py-1.5" style={{ color: col.is_pk ? 'var(--color-accent)' : 'var(--color-muted)' }}>
+                                    {col.is_pk ? '✓' : ''}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>
               )
             })}
           </tbody>

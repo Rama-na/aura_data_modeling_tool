@@ -126,6 +126,7 @@ def create_iteration(session_id: str, trigger: str, user_comment: str | None = N
     STORE["iterations"][session_id][idx] = {
         "iter_idx": idx,
         "status": "running",
+        "stage": "waiting",
         "trigger": trigger,
         "user_comment": user_comment or "",
         "created_at": _now(),
@@ -184,6 +185,12 @@ def write_agent5_result(
     })
 
 
+def set_iteration_stage(session_id: str, iter_idx: int, stage: str) -> None:
+    it = STORE["iterations"].get(session_id, {}).get(iter_idx)
+    if it:
+        it["stage"] = stage
+
+
 def mark_iteration_complete(session_id: str, iter_idx: int) -> None:
     it = STORE["iterations"].get(session_id, {}).get(iter_idx)
     if it:
@@ -206,6 +213,7 @@ def get_iteration_summary(session_id: str, iter_idx: int) -> dict | None:
         "trigger": it["trigger"],
         "user_comment": it.get("user_comment") or None,
         "status": it["status"],
+        "stage": it.get("stage", "waiting"),
         "created_at": it["created_at"],
     }
 
@@ -221,6 +229,7 @@ def get_iteration_detail(session_id: str, iter_idx: int) -> dict | None:
         "status": it["status"],
         "created_at": it["created_at"],
         "error_msg": it.get("error_msg") or None,
+        "stage": it.get("stage", "waiting"),
         "agent4": {
             "input_snapshot": it.get("agent4_input_snapshot"),
             "output": it.get("agent4_output"),

@@ -18,12 +18,13 @@ const MERMAID_CONFIG = {
 interface Props {
   source: string
   loading?: boolean
+  onError?: () => void
 }
 
 let diagCounter = 0
 let mermaidInitialised = false
 
-export default function MermaidRenderer({ source, loading = false }: Props) {
+export default function MermaidRenderer({ source, loading = false, onError }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -44,7 +45,9 @@ export default function MermaidRenderer({ source, loading = false }: Props) {
         if (ref.current) ref.current.innerHTML = svg
       })
       .catch((e) => {
-        setError('Diagram render error: ' + String(e).slice(0, 120))
+        const msg = 'Diagram render error: ' + String(e).slice(0, 120)
+        setError(msg)
+        onError?.()
       })
   }, [source])
 

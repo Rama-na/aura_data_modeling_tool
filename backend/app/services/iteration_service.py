@@ -38,6 +38,7 @@ async def run_iteration(
 
         # --- Agent 4 — Schema Designer ---
         logger.info(f"[{session_id}] iter {iter_idx}: running Schema Designer")
+        state.set_iteration_stage(session_id, iter_idx, "agent4_running")
 
         agent4_input = {
             "schema": parsed_schema,
@@ -74,6 +75,7 @@ async def run_iteration(
 
         # --- Agent 5 — ER Generator ---
         logger.info(f"[{session_id}] iter {iter_idx}: running ER Generator")
+        state.set_iteration_stage(session_id, iter_idx, "agent5_running")
 
         agent5_input = {"schema_plan": schema_plan}
 

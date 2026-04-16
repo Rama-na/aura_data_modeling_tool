@@ -1,11 +1,14 @@
 import { create } from 'zustand'
 import { getIteration, listIterations, submitComment, generateNotebooks, getNotebookStatus } from '../api/iterations'
 
+export type IterationStage = 'waiting' | 'agent4_running' | 'agent5_running' | 'complete' | 'error'
+
 export interface IterationSummary {
   iter_idx: number
   trigger: 'initial' | 'user_comment'
   user_comment: string | null
   status: 'running' | 'complete' | 'error'
+  stage: IterationStage
   created_at: string
 }
 
@@ -42,8 +45,8 @@ interface NotebookJob {
 interface RefinementStore {
   sessionId: string | null
   iterations: IterationSummary[]
-  currentIterIdx: number      // which version user is VIEWING
-  latestIterIdx: number       // most recent iteration
+  currentIterIdx: number
+  latestIterIdx: number
   viewingIterDetail: IterationDetail | null
   isPolling: boolean
   isSubmitting: boolean
@@ -54,7 +57,6 @@ interface RefinementStore {
   notebookPolling: boolean
   error: string | null
 
-  // Actions
   init: (sessionId: string) => Promise<void>
   submitComment: (comment: string) => Promise<void>
   switchToIteration: (idx: number) => Promise<void>
@@ -84,19 +86,22 @@ export const useRefinementStore = create<RefinementStore>((set, get) => ({
   error: null,
 
   init: async (sessionId: string) => {
-    set({ sessionId })
-    const data = await listIterations(sessionId)
-    const iters: IterationSummary[] = data.iterations || []
-    const latestIdx = data.latest_iter_idx ?? -1
-    set({ iterations: iters, latestIterIdx: latestIdx, currentIterIdx: latestIdx })
+    set({ sessionId, error: null })
+    try {
+      const data = await listIterations(sessionId)
+      const iters: IterationSummary[] = data.iterations || []
+      const latestIdx = data.latest_iter_idx ?? -1
+      set({ iterations: iters, latestIterIdx: latestIdx, currentIterIdx: latestIdx })
 
-    // If latest is running (resumed session), start polling
-    const latest = iters.find((i) => i.iter_idx === latestIdx)
-    if (latest?.status === 'running') {
-      get()._startPolling(latestIdx)
-    } else if (latestIdx >= 0) {
-      // Load detail for current
-      await get().switchToIteration(latestIdx)
+      const latest = iters.find((i) => i.iter_idx === latestIdx)
+      if (latest?.status === 'running') {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ;(get() as any)._startPolling(latestIdx)
+      } else if (latestIdx >= 0) {
+        await get().switchToIteration(latestIdx)
+      }
+    } catch (e: unknown) {
+      set({ error: `Failed to load session: ${(e as Error).message}` })
     }
   },
 
@@ -119,11 +124,13 @@ export const useRefinementStore = create<RefinementStore>((set, get) => ({
             trigger: 'user_comment',
             user_comment: comment,
             status: 'running',
+            stage: 'waiting' as IterationStage,
             created_at: new Date().toISOString(),
           },
         ],
       }))
-      get()._startPolling(newIdx)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(get() as any)._startPolling(newIdx)
     } catch (e: unknown) {
       set({ isSubmitting: false, error: (e as Error).message })
     }
@@ -149,7 +156,8 @@ export const useRefinementStore = create<RefinementStore>((set, get) => ({
     try {
       await generateNotebooks(sessionId, idx)
       set({ notebookPolling: true, notebookJob: { status: 'running', domains_total: 0, domains_completed: 0, current_domain: '', manifest: [] } })
-      get()._startNotebookPolling()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(get() as any)._startNotebookPolling()
     } catch (e: unknown) {
       set({ error: (e as Error).message })
     }
@@ -160,7 +168,7 @@ export const useRefinementStore = create<RefinementStore>((set, get) => ({
   toggleDebug: () => set((st) => ({ debugOpen: !st.debugOpen })),
   clearError: () => set({ error: null }),
 
-  // Internal — not exposed on type but accessible via get()
+  // Internal polling — not in interface type, accessed via (get() as any)
   _startPolling: (idx: number) => {
     if (pollTimer) clearInterval(pollTimer)
     set({ isPolling: true })
@@ -170,6 +178,12 @@ export const useRefinementStore = create<RefinementStore>((set, get) => ({
       if (!sessionId) return
       try {
         const detail: IterationDetail = await getIteration(sessionId, idx)
+        // Always update stage so progress UI refreshes
+        set((st) => ({
+          iterations: st.iterations.map((it) =>
+            it.iter_idx === idx ? { ...it, stage: detail.stage ?? it.stage } : it
+          ),
+        }))
         if (detail.status === 'complete' || detail.status === 'error') {
           clearInterval(pollTimer!)
           pollTimer = null
@@ -178,7 +192,7 @@ export const useRefinementStore = create<RefinementStore>((set, get) => ({
             currentIterIdx: idx,
             viewingIterDetail: detail,
             iterations: st.iterations.map((it) =>
-              it.iter_idx === idx ? { ...it, status: detail.status } : it
+              it.iter_idx === idx ? { ...it, status: detail.status, stage: detail.stage ?? it.stage } : it
             ),
           }))
         }
