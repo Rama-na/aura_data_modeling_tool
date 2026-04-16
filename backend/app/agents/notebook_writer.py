@@ -1,12 +1,14 @@
 """
-Agent 6 — Notebook Writer (PySpark .ipynb generator).
-Generates one Fabric PySpark notebook per domain cluster.
+Agent 6 — Notebook Writer (PySpark code generator).
+Generates one Fabric PySpark notebook per domain cluster using medallion architecture.
+LLM outputs clean PySpark code; backend wraps it in a .ipynb structure.
 """
 from __future__ import annotations
 
 import json
 import logging
 import re
+import uuid
 
 from app.core.azure_openai import LLMResponse, llm_client
 from app.prompts import (
@@ -42,6 +44,33 @@ def _make_empty_notebook(domain_name: str) -> dict:
     }
 
 
+def _wrap_code_as_notebook(code: str, domain_name: str) -> dict:
+    """Wraps raw PySpark code string into a valid .ipynb structure."""
+    nb = _make_empty_notebook(domain_name)
+
+    # Split code into logical sections at blank-line-separated blocks
+    # and create one code cell per section for readability
+    sections = re.split(r'\n{2,}(?=# ---)', code.strip())
+
+    if not sections or not any(s.strip() for s in sections):
+        return nb
+
+    for section in sections:
+        section = section.strip()
+        if not section:
+            continue
+        nb["cells"].append({
+            "cell_type": "code",
+            "execution_count": None,
+            "metadata": {},
+            "outputs": [],
+            "source": [section],
+            "id": str(uuid.uuid4())[:8],
+        })
+
+    return nb
+
+
 class NotebookDomainSplitter:
     """Clusters star schema tables into logical business domains."""
 
@@ -75,12 +104,13 @@ class NotebookWriterAgent:
         self,
         domain: dict,
         schema_plan: dict,
-        prior_notebook_cells: list | None = None,
+        current_relation_state: dict | None = None,
     ) -> dict:
         """
         domain: {domain_name, tables, description}
-        prior_notebook_cells: cell source strings from previous notebook (for context)
-        Returns: {notebook_json, llm_response}
+        schema_plan: full star schema plan from Agent 4
+        current_relation_state: structured dict built by notebook_service after each domain
+        Returns: {notebook_json, pyspark_code, llm_response}
         """
         domain_name = domain["domain_name"]
         tables_list = ", ".join(domain.get("tables", []))
@@ -102,21 +132,19 @@ class NotebookWriterAgent:
             ],
         }
 
-        # Build prior context (cell sources only, truncated to 3000 chars)
-        if prior_notebook_cells:
-            prior_context = "\n---\n".join(
-                "".join(cell) if isinstance(cell, list) else cell
-                for cell in prior_notebook_cells
-            )[:3000]
-            prior_context = f"Previous notebook cells (for reference):\n{prior_context}"
-        else:
-            prior_context = "This is the first notebook — no prior context."
+        relation_state = current_relation_state or {
+            "available_dataframes": [],
+            "grain": "Unknown",
+            "joined_tables": [],
+            "primary_keys": [],
+            "ready_for_join": list(domain_tables),
+        }
 
         user_prompt = NOTEBOOK_WRITER_USER_V1.format(
             domain_name=domain_name,
             tables_list=tables_list,
             domain_schema_json=json.dumps(domain_schema, indent=2, default=str),
-            prior_notebook_context=prior_context,
+            current_relation_state_json=json.dumps(relation_state, indent=2, default=str),
         )
 
         response = llm_client.complete(
@@ -126,37 +154,23 @@ class NotebookWriterAgent:
             max_tokens=8192,
         )
 
-        notebook_json = self._parse_notebook(response.content, domain_name)
+        pyspark_code = self._extract_code(response.content)
+        notebook_json = _wrap_code_as_notebook(pyspark_code, domain_name)
+
         return {
             "notebook_json": notebook_json,
+            "pyspark_code": pyspark_code,
             "llm_response": response,
         }
 
-    def _parse_notebook(self, content: str, domain_name: str) -> dict:
-        cleaned = re.sub(r"^```(?:json)?\s*", "", content.strip(), flags=re.MULTILINE)
+    def _extract_code(self, content: str) -> str:
+        """Strip markdown fences and return clean Python code."""
+        cleaned = re.sub(r"^```(?:python)?\s*", "", content.strip(), flags=re.MULTILINE)
         cleaned = re.sub(r"\s*```$", "", cleaned.strip(), flags=re.MULTILINE)
-        try:
-            nb = json.loads(cleaned)
-            # Ensure required notebook fields
-            if "nbformat" not in nb:
-                nb["nbformat"] = 4
-            if "nbformat_minor" not in nb:
-                nb["nbformat_minor"] = 5
-            if "metadata" not in nb:
-                nb["metadata"] = {
-                    "kernelspec": {
-                        "display_name": "PySpark",
-                        "language": "python",
-                        "name": "synapse_pyspark",
-                    }
-                }
-            return nb
-        except json.JSONDecodeError as e:
-            logger.error(f"NotebookWriter parse error for {domain_name}: {e}")
-            return _make_empty_notebook(domain_name)
+        return cleaned.strip()
 
     def get_cell_sources(self, notebook_json: dict) -> list[str]:
-        """Extract cell source strings for use as prior context."""
+        """Extract cell source strings (kept for backward compat if needed)."""
         sources = []
         for cell in notebook_json.get("cells", []):
             src = cell.get("source", [])

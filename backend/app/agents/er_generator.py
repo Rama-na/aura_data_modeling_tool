@@ -28,6 +28,10 @@ def _validate_mermaid(source: str) -> tuple[bool, str]:
     close_braces = source.count("}")
     if open_braces != close_braces:
         return False, f"Mismatched braces: {open_braces} open, {close_braces} close"
+    # Detect legacy/invalid cardinality markers rejected by Mermaid v9+
+    # Valid markers: || |o }| }o  — invalid: |{ }{
+    if re.search(r'\|\{', source) or re.search(r'\}\{', source):
+        return False, "Invalid cardinality markers detected (use }| }o || |o — not |{ or }{)"
     return True, ""
 
 

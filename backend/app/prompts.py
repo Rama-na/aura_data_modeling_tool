@@ -283,7 +283,9 @@ You must return a valid JSON object containing the Mermaid diagram source and th
 No markdown code fences around the JSON. The Mermaid source inside the JSON may contain newlines.
 
 Mermaid erDiagram rules:
-- Use || for exactly one, |{ for one or more, }{ for zero or more, }| for zero or one
+- Use || (exactly one), |o (zero or one), }| (one or more), }o (zero or more)
+- NEVER use |{ or }{ — these are invalid in Mermaid v9+
+- For star schema: a fact table row references one dimension row: FactTable }|--|| DimTable : ""
 - Entity names cannot contain spaces (use underscores)
 - Column format: TYPE column_name LABEL (PK, FK, UK, or leave blank)
 - String data type for text columns, int for integers, decimal for decimals, date/datetime for dates"""
@@ -322,7 +324,8 @@ Please carefully re-generate the Mermaid erDiagram. Common issues to avoid:
 - Do not use spaces in entity names (use underscores)
 - Ensure every opening {{ has a matching closing }}
 - Column definitions must follow: TYPE name LABEL (e.g., int customer_sk FK)
-- Relationship lines: EntityA ||--o{{ EntityB : "label"
+- Relationship lines use ONLY these markers: || |o }}| }}o  e.g. FactSales }}|--|| DimDate : ""
+- NEVER use |{{ or }}{{ — they are invalid in Mermaid v9+ and will cause a parse error
 
 Return the same JSON structure as before."""
 
@@ -361,37 +364,106 @@ Return:
   ]
 }}"""
 
-NOTEBOOK_WRITER_SYSTEM_V1 = """You are a Microsoft Fabric PySpark expert. You generate production-ready
-PySpark notebooks that load data from a source SQL Server database into a Fabric Lakehouse using Delta tables.
+NOTEBOOK_WRITER_SYSTEM_V1 = """You are a Microsoft Fabric PySpark expert specializing in medallion architecture (Bronze → Silver → Gold).
 
-Each notebook you generate is self-contained and covers one business domain.
+You generate clean, production-ready PySpark transformation code that reads from Bronze Delta tables
+and writes to Silver Lakehouse tables. Each notebook covers one business domain.
 
-Standard notebook structure per table:
-1. Markdown cell: table header (name, description, SCD type if dimension)
-2. Code cell: read from source (use spark.read.jdbc with a placeholder JDBC URL)
-3. Code cell: rename and cast columns to target schema
-4. Code cell: generate surrogate keys (use monotonically_increasing_id() + 1)
-5. For SCD2 dimensions: code cell to merge with existing Delta table using effectiveDate/expiryDate/isCurrent pattern
-6. For facts and SCD1: code cell to write/overwrite Delta table
-7. Markdown cell: completion note
+BRONZE SOURCE:
+All source tables are available as Delta tables at:
+  bronze_base_path = "abfss://prd_SecuredBronze@onelake.dfs.fabric.microsoft.com/lh_bronze_ebom_prod_t1.Lakehouse/Tables/dbo/"
 
-Use these constants at the top of each notebook:
-- LAKEHOUSE_PATH = "abfss://your-lakehouse@onelake.dfs.fabric.microsoft.com/Tables"
-- SOURCE_JDBC_URL = "jdbc:sqlserver://your-server;database=your-db;..."
+To read a Bronze table:
+  df = spark.read.format("delta").load(bronze_base_path + "TableName")
 
-Return ONLY valid .ipynb JSON. No explanation text outside the notebook JSON."""
+SILVER TARGET:
+Write transformed/joined DataFrames to Silver Lakehouse:
+  df.write.format("delta").mode("overwrite").saveAsTable("silver.table_name")
 
-NOTEBOOK_WRITER_USER_V1 = """Generate a PySpark notebook for the following domain.
+REVISION HANDLING:
+Many source tables have revision columns (RevisionNumber, ChangeNumber, Seq, etc.).
+Always select only the current/latest revision using this helper pattern:
+  from pyspark.sql import Window
+  from pyspark.sql.functions import row_number, col
+
+  def get_current_revision_max(df, key_cols, revision_col):
+      w = Window.partitionBy(key_cols).orderBy(col(revision_col).desc())
+      return df.withColumn("_rn", row_number().over(w)).filter("_rn = 1").drop("_rn")
+
+STATE-AWARE INCREMENTAL JOIN STRATEGY:
+You will receive a CURRENT_RELATION_STATE showing what has already been processed:
+- available_dataframes: df names already built in prior domains (already written to Silver)
+- joined_tables: table names already processed
+- ready_for_join: table names still to be processed in this and future domains
+- grain: the grain description for the central fact in this domain
+- primary_keys: the natural key columns for the main fact
+
+Build DataFrames incrementally for this domain only:
+1. Load each Bronze table needed for THIS domain (skip anything in joined_tables)
+2. Apply revision filtering where appropriate
+3. Rename/cast columns to target schema names
+4. Join dimensions to the fact table per the star schema spec
+5. Write the final joined Silver table
+
+Do NOT re-load or re-process tables listed in available_dataframes — they are already in Silver.
+
+OUTPUT REQUIREMENTS:
+* Generate clean, modular PySpark code (NOT .ipynb JSON)
+* Use clear section comments: # --- SECTION NAME ---
+* One logical step per code block, separated by blank lines
+* All column renames and type casts must be explicit — no implicit passes
+* Variable naming: df_{{table_name}} for each table DataFrame (e.g., df_sales_fact, df_customer_dim)
+* No placeholder comments like "# add your code here" """
+
+NOTEBOOK_WRITER_USER_V1 = """Generate the PySpark transformation code for the following domain.
 
 DOMAIN: {domain_name}
-TABLES IN THIS DOMAIN: {tables_list}
+DOMAIN TABLES: {tables_list}
 
-STAR SCHEMA SPEC FOR THESE TABLES:
+STAR SCHEMA SPEC FOR THIS DOMAIN:
 {domain_schema_json}
 
-CONTEXT FROM PREVIOUS NOTEBOOK (for consistent naming and patterns):
-{prior_notebook_context}
+CURRENT RELATION STATE:
+{current_relation_state_json}
 
-Generate a complete, runnable .ipynb notebook JSON with all cells.
-The notebook should handle all tables in the domain in a logical order
-(dimensions before facts, parent dimensions before child ones)."""
+Generate complete, runnable PySpark code for this domain.
+Process dimensions before facts. Reference CURRENT_RELATION_STATE.available_dataframes
+for any DataFrames already available from prior domains.
+Return ONLY the Python code — no JSON wrapper, no markdown fences."""
+
+# ---------------------------------------------------------------------------
+# Agent 7 — Notebook Validator
+# ---------------------------------------------------------------------------
+
+NOTEBOOK_VALIDATOR_SYSTEM_V1 = """You are a PySpark code reviewer specializing in medallion architecture validation
+for Microsoft Fabric lakehouses.
+
+Your job is to validate whether generated notebook code correctly implements the Bronze-to-Silver
+transformation pattern, respects the CURRENT_RELATION_STATE, and properly handles the domain tables.
+
+Return a valid JSON object only. No markdown, no explanatory text outside the JSON."""
+
+NOTEBOOK_VALIDATOR_USER_V1 = """Validate the following PySpark notebook code.
+
+DOMAIN TABLES: {domain_tables}
+
+CURRENT RELATION STATE:
+{current_relation_state}
+
+GENERATED NOTEBOOK CODE:
+{notebook_code}
+
+Check each of the following:
+1. Does it read from Bronze ABFSS Delta paths (not JDBC or other sources)?
+2. Does it apply revision filtering for tables that likely have revision columns?
+3. Does it correctly reference DataFrames listed in CURRENT_RELATION_STATE.available_dataframes without re-loading them?
+4. Are all joins consistent with the domain tables list (no missing or extra joins)?
+5. Does it write output to Silver using saveAsTable or Delta format?
+6. Are variable names consistent with the df_{{table_name}} convention?
+
+Return this exact JSON:
+{{
+  "is_valid": true,
+  "issues": [],
+  "suggestions": "Any brief improvement suggestions, or empty string if none"
+}}"""
