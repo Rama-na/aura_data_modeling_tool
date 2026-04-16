@@ -201,8 +201,12 @@ export default function RefinementPage() {
             onSwitch={switchToIteration}
           />
           <div className="flex-1 overflow-auto rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-            {isPolling && runningIter ? (
-              <AgentProgressPanel stage={currentStage} startedAt={runningIter.created_at} />
+            {isPolling ? (
+              /* Show progress panel whenever polling — even before runningIter appears in store */
+              <AgentProgressPanel
+                stage={currentStage}
+                startedAt={runningIter?.created_at ?? new Date().toISOString()}
+              />
             ) : iterations.length === 0 ? (
               <div className="flex items-center justify-center h-full gap-2" style={{ color: 'var(--color-muted)' }}>
                 <Loader2 size={16} className="animate-spin" />
