@@ -195,12 +195,14 @@ def mark_iteration_complete(session_id: str, iter_idx: int) -> None:
     it = STORE["iterations"].get(session_id, {}).get(iter_idx)
     if it:
         it["status"] = "complete"
+        it["stage"] = "complete"
 
 
 def mark_iteration_error(session_id: str, iter_idx: int, error_msg: str) -> None:
     it = STORE["iterations"].get(session_id, {}).get(iter_idx)
     if it:
         it["status"] = "error"
+        it["stage"] = "error"
         it["error_msg"] = error_msg
 
 
