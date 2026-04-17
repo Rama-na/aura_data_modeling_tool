@@ -93,8 +93,9 @@ class NotebookDomainSplitter:
             all_tables = (
                 [t["table_name"] for t in schema_plan.get("fact_tables", [])]
                 + [t["table_name"] for t in schema_plan.get("dimension_tables", [])]
+                + [t.get("table_name", "") for t in schema_plan.get("bridge_tables", [])]
             )
-            return [{"domain_name": "Main", "tables": all_tables, "description": "All tables"}]
+            return [{"domain_name": "Main", "tables": [t for t in all_tables if t], "description": "All tables"}]
 
 
 class NotebookWriterAgent:

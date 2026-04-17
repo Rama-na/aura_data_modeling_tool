@@ -36,7 +36,9 @@ export default function AppSidebar() {
   const { sessions, setSessions, currentSession } = useSessionStore()
 
   const activeStep = getActiveStep(location.pathname)
-  const activeSessionId = sessionId || currentSession?.session_id || ''
+  // useParams() returns {} when rendered outside <Routes>, so parse sessionId from the URL path
+  const urlSessionId = location.pathname.match(/\/session\/([^/]+)/)?.[1] ?? ''
+  const activeSessionId = urlSessionId || sessionId || currentSession?.session_id || ''
 
   useEffect(() => {
     listSessions().then(setSessions).catch(() => {})

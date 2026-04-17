@@ -87,6 +87,26 @@ async def generate_notebooks(
     state.create_notebook_job(session_id, job_id, len(domains))
     state.update_session_status(session_id, state.SessionStatus.generating_notebooks)
 
+    # Build the full set of table names from the schema plan so we can detect any
+    # tables the domain splitter LLM accidentally omitted.
+    all_schema_tables: list[str] = (
+        [t["table_name"] for t in schema_plan.get("fact_tables", [])]
+        + [t["table_name"] for t in schema_plan.get("dimension_tables", [])]
+        + [t.get("table_name", "") for t in schema_plan.get("bridge_tables", [])]
+    )
+    all_schema_tables = [t for t in all_schema_tables if t]  # drop empty strings
+
+    # Tables that the LLM assigned to a domain
+    llm_assigned: set[str] = set()
+    for d in domains:
+        llm_assigned.update(d.get("tables", []))
+
+    # Any table in the schema plan that the splitter missed → add a catch-all domain
+    missed = [t for t in all_schema_tables if t not in llm_assigned]
+    if missed:
+        logger.warning(f"[{session_id}] domain splitter missed {len(missed)} tables: {missed}. Adding catch-all domain.")
+        domains = list(domains) + [{"domain_name": "Supplemental", "tables": missed, "description": "Tables not assigned to any domain by the domain splitter."}]
+
     # Precompute all table names in order (for ready_for_join tracking)
     all_tables_ordered: list[str] = []
     for d in domains:
