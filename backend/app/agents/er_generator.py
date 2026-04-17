@@ -88,11 +88,25 @@ def _normalize_table_entry(entry: dict) -> dict:
         or entry.get("fields")
         or entry.get("column_list")
         or entry.get("attributes")
+        # Fact-table-specific aliases LLMs commonly use instead of "columns"
+        or entry.get("measures")
+        or entry.get("metrics")
+        or entry.get("key_columns")
+        or entry.get("measure_columns")
+        or entry.get("schema")
         or []
     )
+    # If individual key/measure lists exist, merge them
+    merged_cols = list(cols_raw) if isinstance(cols_raw, list) else []
+    if isinstance(cols_raw, list) and not cols_raw:
+        # Try combining separate key + measure lists
+        for extra_key in ("keys", "foreign_keys", "surrogate_keys"):
+            extra = entry.get(extra_key)
+            if isinstance(extra, list):
+                merged_cols.extend(extra)
     return {
         "description": entry.get("description") or entry.get("table_description") or "",
-        "columns": _normalize_columns(cols_raw),
+        "columns": _normalize_columns(merged_cols if merged_cols else cols_raw),
     }
 
 
@@ -202,6 +216,77 @@ def _extract_full_data_dict(parsed: dict) -> dict:
     return merged
 
 
+def _parse_mermaid_tables(mermaid_source: str) -> dict:
+    """
+    Extract table definitions from a Mermaid erDiagram source as a fallback
+    data dictionary.  Works on the rendered format:
+
+        EntityName {
+            int    column_name  PK
+            string other_col
+        }
+
+    Returns {table_name: {"description": "", "columns": [...]}}
+    """
+    tables: dict = {}
+    # Match entity blocks: NAME { ... }
+    block_re = re.compile(r'(\w+)\s*\{([^}]*)\}', re.MULTILINE)
+    # Each line inside a block:  TYPE  col_name  [LABEL]
+    col_re = re.compile(r'^\s*(\S+)\s+(\S+)(?:\s+(\S+))?\s*$')
+
+    for m in block_re.finditer(mermaid_source):
+        table_name = m.group(1)
+        body = m.group(2)
+        cols: list[dict] = []
+        for line in body.splitlines():
+            cm = col_re.match(line)
+            if not cm:
+                continue
+            col_type, col_name, label = cm.group(1), cm.group(2), cm.group(3) or ""
+            # Skip mermaid comment lines
+            if col_type.startswith("%%"):
+                continue
+            cols.append({
+                "name": col_name,
+                "type": col_type,
+                "classification": label if label in {"PK", "FK", "UK"} else "",
+                "description": "",
+            })
+        if cols:
+            tables[table_name] = {"description": "", "columns": cols}
+
+    return tables
+
+
+def _supplement_from_mermaid(data_dict: dict, mermaid_source: str) -> dict:
+    """
+    For any table in the mermaid source that is missing from data_dict or has
+    0 columns, inject the columns parsed from the mermaid source.
+    This covers two failure modes:
+      - LLM used non-standard key names for columns (0 cols stored)
+      - LLM truncated the data_dictionary before reaching all tables
+    """
+    if not mermaid_source:
+        return data_dict
+
+    mermaid_tables = _parse_mermaid_tables(mermaid_source)
+    result = dict(data_dict)
+
+    for table_name, mermaid_entry in mermaid_tables.items():
+        existing = result.get(table_name)
+        if existing is None or len(existing.get("columns", [])) == 0:
+            result[table_name] = {
+                "description": (existing or {}).get("description", ""),
+                "columns": mermaid_entry["columns"],
+            }
+            if existing is None:
+                logger.debug(f"Data dict: added '{table_name}' from mermaid source")
+            else:
+                logger.debug(f"Data dict: supplemented 0-col '{table_name}' from mermaid source")
+
+    return result
+
+
 def _validate_mermaid(source: str) -> tuple[bool, str]:
     """Basic structural validation of Mermaid erDiagram syntax."""
     if not source.strip().startswith("erDiagram"):
@@ -256,9 +341,14 @@ class ERGeneratorAgent:
                 "reasoning": f"Failed: {error}",
             }
 
+        mermaid_source = parsed.get("mermaid_source", "")
+        data_dict = _extract_full_data_dict(parsed)
+        # Supplement any missing/0-col tables from the mermaid source itself
+        data_dict = _supplement_from_mermaid(data_dict, mermaid_source)
+
         return {
-            "mermaid_source": parsed.get("mermaid_source", ""),
-            "data_dictionary": _extract_full_data_dict(parsed),
+            "mermaid_source": mermaid_source,
+            "data_dictionary": data_dict,
             "reasoning": parsed.get("reasoning", ""),
             "llm_response": response,
             "required_retry": required_retry,
