@@ -68,7 +68,7 @@ def _normalize_data_dict(raw: object) -> dict:
     return normalized
 
 
-
+def _validate_mermaid(source: str) -> tuple[bool, str]:
     """Basic structural validation of Mermaid erDiagram syntax."""
     if not source.strip().startswith("erDiagram"):
         return False, "Must start with 'erDiagram'"
