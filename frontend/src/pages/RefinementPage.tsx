@@ -149,7 +149,16 @@ export default function RefinementPage() {
   }
 
   const mermaidSource = latestDetail?.agent5?.output_mermaid || ''
-  const dataDict = latestDetail?.agent5?.output_dict as Record<string, unknown> | null
+  // Normalize output_dict: unwrap {"tables": {...}} wrapper if LLM added one
+  const rawDict = latestDetail?.agent5?.output_dict as Record<string, unknown> | null
+  const dataDict = (() => {
+    if (!rawDict) return null
+    const keys = Object.keys(rawDict)
+    if (keys.length === 1 && keys[0] === 'tables' && typeof rawDict.tables === 'object' && rawDict.tables !== null) {
+      return rawDict.tables as Record<string, unknown>
+    }
+    return rawDict
+  })()
   const runningIter = iterations.find((i) => i.iter_idx === latestIterIdx && i.status === 'running')
 
   return (
@@ -269,7 +278,7 @@ export default function RefinementPage() {
           {dataDict && Object.keys(dataDict).length > 0 && (
             <div>
               <div className="text-sm font-medium mb-2">Data Dictionary</div>
-              <DataDictionary dict={dataDict as Record<string, { description: string; columns: { name: string; type: string; classification: string; description: string }[] }>} />
+              <DataDictionary dict={dataDict} />
             </div>
           )}
 

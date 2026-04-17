@@ -20,7 +20,55 @@ logger = logging.getLogger(__name__)
 MAX_RETRIES = 2
 
 
-def _validate_mermaid(source: str) -> tuple[bool, str]:
+def _normalize_data_dict(raw: object) -> dict:
+    """
+    Normalize the data_dictionary regardless of how the LLM formatted it.
+    Handles:
+      - {"tables": {"DimDate": {...}}}  → unwrap "tables" wrapper
+      - columns stored under "column_definitions", "fields", "column_list"
+      - column objects with "column_name"/"data_type" instead of "name"/"type"
+    """
+    if not isinstance(raw, dict):
+        return {}
+
+    # Unwrap single-key {"tables": {table_name: ...}} wrapper
+    if set(raw.keys()) == {"tables"} and isinstance(raw.get("tables"), dict):
+        raw = raw["tables"]
+
+    normalized: dict = {}
+    for table_name, entry in raw.items():
+        if not isinstance(entry, dict):
+            continue
+
+        # Find columns under any of the common LLM key names
+        cols_raw = (
+            entry.get("columns")
+            or entry.get("column_definitions")
+            or entry.get("fields")
+            or entry.get("column_list")
+            or []
+        )
+
+        cols_normalized = []
+        for col in cols_raw if isinstance(cols_raw, list) else []:
+            if not isinstance(col, dict):
+                continue
+            cols_normalized.append({
+                "name": col.get("name") or col.get("column_name") or col.get("field_name") or "",
+                "type": col.get("type") or col.get("data_type") or col.get("datatype") or "",
+                "classification": col.get("classification") or col.get("key_type") or col.get("constraint") or "",
+                "description": col.get("description") or col.get("desc") or "",
+            })
+
+        normalized[table_name] = {
+            "description": entry.get("description") or entry.get("table_description") or "",
+            "columns": cols_normalized,
+        }
+
+    return normalized
+
+
+
     """Basic structural validation of Mermaid erDiagram syntax."""
     if not source.strip().startswith("erDiagram"):
         return False, "Must start with 'erDiagram'"
@@ -76,7 +124,7 @@ class ERGeneratorAgent:
 
         return {
             "mermaid_source": parsed.get("mermaid_source", ""),
-            "data_dictionary": parsed.get("data_dictionary", {}),
+            "data_dictionary": _normalize_data_dict(parsed.get("data_dictionary", {})),
             "reasoning": parsed.get("reasoning", ""),
             "llm_response": response,
             "required_retry": required_retry,
