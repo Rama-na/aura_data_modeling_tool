@@ -136,8 +136,70 @@ def _normalize_data_dict(raw: object) -> dict:
     for table_name, entry in raw.items():
         if not isinstance(entry, dict):
             continue
-        normalized[str(table_name)] = _normalize_table_entry(entry)
+        # If this value looks like a *group* of table entries rather than a single
+        # table entry (e.g. LLM used "dimension_tables": {"dim_customer": {...}}),
+        # flatten it one level.
+        if _looks_like_table_group(entry):
+            for sub_name, sub_entry in entry.items():
+                if isinstance(sub_entry, dict):
+                    normalized[str(sub_name)] = _normalize_table_entry(sub_entry)
+        else:
+            normalized[str(table_name)] = _normalize_table_entry(entry)
     return normalized
+
+
+def _looks_like_table_group(v: dict) -> bool:
+    """
+    Return True when v is a dict of table entries (a group), not a single table entry.
+    A table entry has keys like 'columns', 'description', etc.
+    A group has those keys nested one level deeper.
+    """
+    table_keys = {"columns", "column_definitions", "fields", "column_list", "attributes", "description"}
+    if any(k in v for k in table_keys):
+        return False  # v itself is a table entry
+    for sub_v in v.values():
+        if isinstance(sub_v, dict) and any(k in sub_v for k in table_keys):
+            return True
+    return False
+
+
+def _extract_full_data_dict(parsed: dict) -> dict:
+    """
+    Collect ALL tables from the LLM's parsed response, regardless of where it put them.
+
+    LLMs vary widely: some put everything flat inside data_dictionary, others split
+    fact/dimension tables into separate top-level keys, or nest them under group keys
+    inside data_dictionary. This function merges everything it can find.
+    """
+    # Keys the LLM commonly uses to describe table groups (other than data_dictionary)
+    TABLE_GROUP_KEYS = {
+        "dimension_tables", "dimensions", "dim_tables",
+        "fact_tables", "facts",
+        "bridge_tables", "tables",
+    }
+    NON_TABLE_KEYS = {"mermaid_source", "reasoning", "notes", "explanation", "data_dictionary"}
+
+    merged: dict = {}
+
+    # Primary source: the data_dictionary key
+    raw_dd = parsed.get("data_dictionary", {})
+    if raw_dd:
+        merged.update(_normalize_data_dict(raw_dd))
+
+    # Secondary: scan sibling keys for table groups the LLM put outside data_dictionary
+    for key, value in parsed.items():
+        if key in NON_TABLE_KEYS:
+            continue
+        if not isinstance(value, dict):
+            continue
+        # Either an explicit group key or something that looks like a table group
+        if key in TABLE_GROUP_KEYS or _looks_like_table_group(value):
+            merged.update(_normalize_data_dict(value))
+        elif not merged.get(key):
+            # Could be an individual table entry at the top level
+            merged.update(_normalize_data_dict({key: value}))
+
+    return merged
 
 
 def _validate_mermaid(source: str) -> tuple[bool, str]:
@@ -196,7 +258,7 @@ class ERGeneratorAgent:
 
         return {
             "mermaid_source": parsed.get("mermaid_source", ""),
-            "data_dictionary": _normalize_data_dict(parsed.get("data_dictionary", {})),
+            "data_dictionary": _extract_full_data_dict(parsed),
             "reasoning": parsed.get("reasoning", ""),
             "llm_response": response,
             "required_retry": required_retry,

@@ -72,11 +72,29 @@ function normalizeEntry(raw: RawEntry): { description: string; columns: Column[]
   }
 }
 
+const TABLE_ENTRY_KEYS = new Set([
+  'columns', 'column_definitions', 'fields', 'column_list', 'attributes', 'description',
+])
+const NON_TABLE_KEYS = new Set([
+  'mermaid_source', 'reasoning', 'notes', 'explanation', 'data_dictionary',
+])
+
+/** True when v looks like a GROUP of table entries (not a single table entry). */
+function looksLikeTableGroup(v: RawEntry): boolean {
+  if (Object.keys(v).some((k) => TABLE_ENTRY_KEYS.has(k))) return false
+  return Object.values(v).some(
+    (sub) => sub && typeof sub === 'object' && !Array.isArray(sub) &&
+      Object.keys(sub as RawEntry).some((k) => TABLE_ENTRY_KEYS.has(k)),
+  )
+}
+
 /**
  * Normalize the whole dictionary. Handles:
  *  - dict keyed by table name (normal case)
  *  - {"tables": {...}} or {"tables": [...]} wrapper
  *  - list of table objects: [{"table_name": "…", "columns": […]}, ...]
+ *  - nested groups: {"dimension_tables": {"dim_x": {...}}, "fact_tables": {"fact_x": {...}}}
+ *  - tables outside data_dictionary at sibling keys
  */
 function normalizeDict(
   raw: Record<string, unknown> | unknown[] | null,
@@ -101,14 +119,36 @@ function normalizeDict(
   if (keys.length === 1 && keys[0] === 'tables') {
     const inner = (raw as RawEntry).tables
     if (inner && (typeof inner === 'object' || Array.isArray(inner))) {
-      return normalizeDict(inner)
+      return normalizeDict(inner as Record<string, unknown>)
     }
   }
 
+  const TABLE_GROUP_NAMES = new Set([
+    'dimension_tables', 'dimensions', 'dim_tables',
+    'fact_tables', 'facts', 'bridge_tables', 'tables',
+  ])
+
   const out: Record<string, { description: string; columns: Column[] }> = {}
-  for (const [tableName, entry] of Object.entries(raw)) {
-    if (entry && typeof entry === 'object') {
-      out[tableName] = normalizeEntry(entry as RawEntry)
+
+  for (const [key, entry] of Object.entries(raw)) {
+    if (NON_TABLE_KEYS.has(key)) continue
+    if (!entry || typeof entry !== 'object') continue
+
+    if (Array.isArray(entry)) {
+      // Nested list of tables
+      Object.assign(out, normalizeDict(entry as unknown[]))
+    } else {
+      const e = entry as RawEntry
+      // If it's a named group key OR looks like a group, flatten one level
+      if (TABLE_GROUP_NAMES.has(key) || looksLikeTableGroup(e)) {
+        for (const [subName, subEntry] of Object.entries(e)) {
+          if (subEntry && typeof subEntry === 'object' && !Array.isArray(subEntry)) {
+            out[subName] = normalizeEntry(subEntry as RawEntry)
+          }
+        }
+      } else {
+        out[key] = normalizeEntry(e)
+      }
     }
   }
   return out

@@ -295,7 +295,7 @@ ER_GENERATOR_USER_V1 = """Generate a Mermaid erDiagram and data dictionary for t
 STAR SCHEMA SPECIFICATION:
 {schema_plan_json}
 
-Return a JSON object with this exact structure:
+Return a JSON object with this exact structure — include EVERY table (fact tables AND dimension tables) inside data_dictionary:
 {{
   "mermaid_source": "erDiagram\\n  sales_fact {{\\n    int sales_sk PK\\n    ...\\n  }}\\n  ...",
   "data_dictionary": {{
@@ -305,10 +305,20 @@ Return a JSON object with this exact structure:
         {{"name": "sales_sk", "type": "int", "classification": "PK", "description": "Surrogate key"}},
         {{"name": "customer_sk", "type": "int", "classification": "FK", "description": "Foreign key to customer_dim"}}
       ]
+    }},
+    "customer_dim": {{
+      "description": "Customer reference dimension.",
+      "columns": [
+        {{"name": "customer_sk", "type": "int", "classification": "PK", "description": "Surrogate key"}},
+        {{"name": "customer_name", "type": "string", "classification": "", "description": "Full name"}}
+      ]
     }}
   }},
   "reasoning": "Brief explanation of diagram design decisions"
-}}"""
+}}
+
+IMPORTANT: ALL tables — both fact and dimension — must appear as flat keys inside data_dictionary.
+Do NOT create nested groups like "dimension_tables" or "fact_tables" inside data_dictionary."""
 
 ER_GENERATOR_RETRY_V1 = """Your previous attempt produced invalid Mermaid syntax that could not be parsed.
 
