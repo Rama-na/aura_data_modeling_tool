@@ -20,51 +20,123 @@ logger = logging.getLogger(__name__)
 MAX_RETRIES = 2
 
 
+def _normalize_column(col: object, fallback_name: str = "") -> dict | None:
+    """Normalize a single column entry — tolerates many field-name aliases."""
+    if not isinstance(col, dict):
+        return None
+    return {
+        "name": (
+            col.get("name")
+            or col.get("column_name")
+            or col.get("field_name")
+            or col.get("col_name")
+            or col.get("attr_name")
+            or col.get("field")
+            or col.get("property_name")
+            or fallback_name
+            or ""
+        ),
+        "type": (
+            col.get("type")
+            or col.get("data_type")
+            or col.get("datatype")
+            or col.get("dtype")
+            or ""
+        ),
+        "classification": (
+            col.get("classification")
+            or col.get("key_type")
+            or col.get("constraint")
+            or col.get("key")
+            or ""
+        ),
+        "description": col.get("description") or col.get("desc") or col.get("comment") or "",
+    }
+
+
+def _normalize_columns(cols_raw: object) -> list:
+    """Handle columns as list, or as dict keyed by column name."""
+    normalized: list = []
+    if isinstance(cols_raw, list):
+        for col in cols_raw:
+            n = _normalize_column(col)
+            if n:
+                normalized.append(n)
+    elif isinstance(cols_raw, dict):
+        # {"sales_sk": {"type": "int", "classification": "PK"}, …}
+        for col_name, col_body in cols_raw.items():
+            if isinstance(col_body, dict):
+                n = _normalize_column(col_body, fallback_name=str(col_name))
+                if n:
+                    normalized.append(n)
+            elif isinstance(col_body, str):
+                # {"sales_sk": "int"} shorthand
+                normalized.append({
+                    "name": str(col_name),
+                    "type": col_body,
+                    "classification": "",
+                    "description": "",
+                })
+    return normalized
+
+
+def _normalize_table_entry(entry: dict) -> dict:
+    """Pull columns + description out of a table entry, handling aliases."""
+    cols_raw = (
+        entry.get("columns")
+        or entry.get("column_definitions")
+        or entry.get("fields")
+        or entry.get("column_list")
+        or entry.get("attributes")
+        or []
+    )
+    return {
+        "description": entry.get("description") or entry.get("table_description") or "",
+        "columns": _normalize_columns(cols_raw),
+    }
+
+
 def _normalize_data_dict(raw: object) -> dict:
     """
     Normalize the data_dictionary regardless of how the LLM formatted it.
     Handles:
       - {"tables": {"DimDate": {...}}}  → unwrap "tables" wrapper
-      - columns stored under "column_definitions", "fields", "column_list"
-      - column objects with "column_name"/"data_type" instead of "name"/"type"
+      - list of table objects: [{"table_name": "sales_fact", "columns": [...]}, ...]
+      - columns stored under various aliases (column_definitions, fields, attributes, column_list)
+      - columns as a dict keyed by column name instead of a list
+      - column objects with assorted field-name aliases (column_name, data_type, etc.)
     """
+    # List shape: [{"table_name": "…", "columns": [...]}, ...]
+    if isinstance(raw, list):
+        normalized_from_list: dict = {}
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            table_name = (
+                item.get("table_name")
+                or item.get("name")
+                or item.get("table")
+                or ""
+            )
+            if not table_name:
+                continue
+            normalized_from_list[str(table_name)] = _normalize_table_entry(item)
+        return normalized_from_list
+
     if not isinstance(raw, dict):
         return {}
 
-    # Unwrap single-key {"tables": {table_name: ...}} wrapper
-    if set(raw.keys()) == {"tables"} and isinstance(raw.get("tables"), dict):
-        raw = raw["tables"]
+    # Unwrap single-key {"tables": ...} wrapper (may wrap dict OR list)
+    if set(raw.keys()) == {"tables"}:
+        inner = raw.get("tables")
+        if isinstance(inner, (dict, list)):
+            return _normalize_data_dict(inner)
 
     normalized: dict = {}
     for table_name, entry in raw.items():
         if not isinstance(entry, dict):
             continue
-
-        # Find columns under any of the common LLM key names
-        cols_raw = (
-            entry.get("columns")
-            or entry.get("column_definitions")
-            or entry.get("fields")
-            or entry.get("column_list")
-            or []
-        )
-
-        cols_normalized = []
-        for col in cols_raw if isinstance(cols_raw, list) else []:
-            if not isinstance(col, dict):
-                continue
-            cols_normalized.append({
-                "name": col.get("name") or col.get("column_name") or col.get("field_name") or "",
-                "type": col.get("type") or col.get("data_type") or col.get("datatype") or "",
-                "classification": col.get("classification") or col.get("key_type") or col.get("constraint") or "",
-                "description": col.get("description") or col.get("desc") or "",
-            })
-
-        normalized[table_name] = {
-            "description": entry.get("description") or entry.get("table_description") or "",
-            "columns": cols_normalized,
-        }
-
+        normalized[str(table_name)] = _normalize_table_entry(entry)
     return normalized
 
 

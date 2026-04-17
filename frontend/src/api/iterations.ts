@@ -19,3 +19,12 @@ export const getNotebookStatus = (sessionId: string) =>
 
 export const getNotebookManifest = (sessionId: string) =>
   api.get(`/sessions/${sessionId}/notebooks/manifest`).then((r) => r.data)
+
+export const combineNotebooks = (sessionId: string, withPolish = false) =>
+  api.post(`/sessions/${sessionId}/notebooks/combine`, { with_polish: withPolish }).then((r) => r.data)
+
+export const getCombineStatus = (sessionId: string) =>
+  api.get(`/sessions/${sessionId}/notebooks/combine/status`).then((r) => r.data)
+
+export const combinedNotebookDownloadUrl = (sessionId: string) =>
+  `/api/v1/sessions/${sessionId}/notebooks/combined.ipynb/download`

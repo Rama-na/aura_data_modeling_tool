@@ -24,11 +24,12 @@ def _now() -> str:
 # ---------------------------------------------------------------------------
 
 STORE: dict[str, Any] = {
-    "sessions":      {},   # session_id -> dict (session meta fields)
-    "data":          {},   # session_id -> {key: value}  (arbitrary JSON blobs)
-    "iterations":    {},   # session_id -> {iter_idx: dict}
-    "iter_idx":      {},   # session_id -> int  (current max index, -1 = none yet)
-    "notebook_jobs": {},   # session_id -> dict
+    "sessions":               {},   # session_id -> dict (session meta fields)
+    "data":                   {},   # session_id -> {key: value}  (arbitrary JSON blobs)
+    "iterations":             {},   # session_id -> {iter_idx: dict}
+    "iter_idx":               {},   # session_id -> int  (current max index, -1 = none yet)
+    "notebook_jobs":          {},   # session_id -> dict
+    "notebook_combine_jobs":  {},   # session_id -> dict (combined-notebook job state)
 }
 
 
@@ -321,6 +322,59 @@ def fail_notebook_job(session_id: str, error_msg: str) -> None:
 
 def get_notebook_job(session_id: str) -> dict | None:
     return copy.deepcopy(STORE["notebook_jobs"].get(session_id))
+
+
+# ---------------------------------------------------------------------------
+# Combined-notebook job state (deterministic merge + optional LLM polish)
+# ---------------------------------------------------------------------------
+
+def create_combine_job(session_id: str, with_polish: bool) -> None:
+    STORE["notebook_combine_jobs"][session_id] = {
+        "status": "running",
+        "stage": "merging",        # merging → polishing → complete | error
+        "with_polish": with_polish,
+        "filename": "",            # set when merge finishes
+        "char_count": 0,
+        "domain_count": 0,
+        "polish_skipped": False,
+        "polish_skip_reason": None,
+        "supervisor_notes": "",
+        "error_msg": None,
+        "created_at": _now(),
+        "updated_at": _now(),
+    }
+
+
+def update_combine_progress(session_id: str, **fields) -> None:
+    job = STORE["notebook_combine_jobs"].get(session_id)
+    if not job:
+        return
+    job.update(fields)
+    job["updated_at"] = _now()
+
+
+def complete_combine_job(session_id: str, **fields) -> None:
+    job = STORE["notebook_combine_jobs"].get(session_id)
+    if not job:
+        return
+    job.update(fields)
+    job["status"] = "complete"
+    job["stage"] = "complete"
+    job["updated_at"] = _now()
+
+
+def fail_combine_job(session_id: str, error_msg: str) -> None:
+    job = STORE["notebook_combine_jobs"].get(session_id)
+    if not job:
+        return
+    job["status"] = "error"
+    job["stage"] = "error"
+    job["error_msg"] = error_msg
+    job["updated_at"] = _now()
+
+
+def get_combine_job(session_id: str) -> dict | None:
+    return copy.deepcopy(STORE["notebook_combine_jobs"].get(session_id))
 
 
 # ---------------------------------------------------------------------------

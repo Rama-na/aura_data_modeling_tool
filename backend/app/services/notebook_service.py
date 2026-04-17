@@ -12,6 +12,7 @@ from app.agents.notebook_validator import notebook_validator
 from app.agents.notebook_writer import domain_splitter, notebook_writer
 from app.services import session_state as state
 from app.services.file_storage import save_manifest, save_notebook
+from app.services.notebook_combiner import combine_notebooks
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +155,18 @@ async def generate_notebooks(
         })
 
     save_manifest(session_id, manifest)
+
+    # Step 3: Deterministic merge into a single combined.ipynb (always-on, no LLM).
+    try:
+        summary = combine_notebooks(session_id)
+        logger.info(
+            f"[{session_id}] combined notebook built: {summary['filename']} "
+            f"({summary['cell_count']} cells, {summary['char_count']} chars)"
+        )
+    except Exception as e:
+        # Combining is best-effort — don't fail the whole notebook job if it breaks.
+        logger.warning(f"[{session_id}] combined notebook build failed: {e}")
+
     state.complete_notebook_job(session_id, manifest)
     logger.info(f"[{session_id}] notebook generation complete — {len(manifest)} notebooks")
     return job_id

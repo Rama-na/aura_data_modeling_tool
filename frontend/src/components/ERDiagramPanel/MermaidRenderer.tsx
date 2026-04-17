@@ -38,7 +38,7 @@ export default function MermaidRenderer({ source, loading = false, onError }: Pr
   const contentRef = useRef<HTMLDivElement>(null)
 
   const [error, setError] = useState<string | null>(null)
-  const [zoom, setZoom] = useState(1)
+  const [zoom, setZoom] = useState(0.7)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const isDragging = useRef(false)
   const dragOrigin = useRef({ mx: 0, my: 0, px: 0, py: 0 })
@@ -83,8 +83,9 @@ export default function MermaidRenderer({ source, loading = false, onError }: Pr
       .then(({ svg }) => {
         if (contentRef.current) {
           contentRef.current.innerHTML = svg
-          // Give browser a frame to lay out the SVG then fit
-          requestAnimationFrame(() => fitToView())
+          // Reset to default 70% zoom on each new render; user can Fit manually
+          setZoom(0.7)
+          setPan({ x: 0, y: 0 })
         }
       })
       .catch((e) => {

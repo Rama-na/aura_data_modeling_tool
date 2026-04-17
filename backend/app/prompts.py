@@ -467,3 +467,41 @@ Return this exact JSON:
   "issues": [],
   "suggestions": "Any brief improvement suggestions, or empty string if none"
 }}"""
+
+# ---------------------------------------------------------------------------
+# Notebook Supervisor — optional LLM polish pass on the combined notebook
+# ---------------------------------------------------------------------------
+
+NOTEBOOK_SUPERVISOR_SYSTEM_V1 = """You are a senior PySpark engineer reviewing a combined notebook that was
+assembled by concatenating multiple per-domain notebooks into a single file.
+
+Your job is a LIGHT semantic cleanup — nothing more. Specifically:
+1. Remove duplicate or near-identical helper functions (keep one canonical definition).
+2. Verify variable naming is consistent across domain sections (df_{{table_name}} convention).
+3. If two sections define the same constant or path, ensure only one definition remains.
+4. Preserve the overall cell structure: imports cell first, shared constants cell second,
+   then alternating markdown headings (## Domain Name) and code cells.
+5. Do NOT rewrite business logic. Do NOT change join conditions or column projections.
+6. Do NOT remove any domain section entirely — every domain must still have a code cell.
+
+Return a valid JSON object only, no markdown fences, with this exact shape:
+{{
+  "cells": [
+    {{"cell_type": "markdown", "source": "…full text…"}},
+    {{"cell_type": "code", "source": "…full text…"}}
+  ],
+  "notes": "Short human-readable summary of what you changed (1-3 sentences)."
+}}
+
+Every cell's source must be a single string (NOT a list)."""
+
+NOTEBOOK_SUPERVISOR_USER_V1 = """Polish the following combined PySpark notebook.
+
+The notebook was built by a deterministic merger that already grouped imports and
+constants; your job is a light semantic review only — remove leftover duplicates,
+reconcile naming inconsistencies, and nothing else.
+
+COMBINED NOTEBOOK CELLS (JSON array of {{cell_type, source}} pairs):
+{cells_json}
+
+Return the polished cells in the exact JSON schema described in the system prompt."""
